@@ -1,0 +1,44 @@
+# Desk Buddy Perception Layer Configuration
+# Tunable parameters for detection thresholds
+
+posture:
+  # Forward head posture: vertical distance from ear to shoulder (normalized)
+  forward_head_threshold: 0.06  # lower = more sensitive
+  # Shoulder tilt: angle of shoulder line relative to horizontal
+  shoulder_tilt_threshold_deg: 12.0  # degrees deviation from horizontal
+  # Torso angle: inclination from vertical
+  torso_angle_threshold_deg: 15.0  # degrees deviation from vertical
+  # Minimum detection confidence for pose landmarks
+  min_detection_confidence: 0.5
+  min_tracking_confidence: 0.5
+
+phone_detection:
+  # YOLO confidence threshold for phone detection
+  confidence_threshold: 0.5
+  # Phone class ID in COCO dataset
+  phone_class_id: 67
+  # Distance threshold for phone-in-hand detection (normalized)
+  hand_proximity_threshold: 0.15
+
+gaze:
+  # Head pose thresholds for attention state
+  yaw_threshold_deg: 30.0  # looking left/right
+  pitch_down_threshold_deg: 20.0  # looking down (potential phone use)
+  pitch_up_threshold_deg: 30.0  # looking up
+  # Minimum detection confidence for face mesh
+  min_detection_confidence: 0.5
+  min_tracking_confidence: 0.5
+
+focus:
+  # Temporal smoothing window size (number of frames)
+  smoothing_window: 15
+  # Minimum duration (in frames) before state change is registered
+  state_change_threshold: 10
+  # Distraction timeout (frames) - how long looking away before marked distracted
+  distraction_timeout: 45  # ~1.5 seconds at 30fps
+
+camera:
+  device_id: 0
+  width: 640
+  height: 480
+  fps: 30
