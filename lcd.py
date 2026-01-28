@@ -1,5 +1,6 @@
 import digitalio
 import board
+import busio
 from PIL import Image, ImageDraw
 import adafruit_rgb_display.ili9341 as ili9341
 import adafruit_rgb_display.st7789 as st7789        # pylint: disable=unused-import
@@ -7,7 +8,12 @@ import adafruit_rgb_display.hx8357 as hx8357        # pylint: disable=unused-imp
 import adafruit_rgb_display.st7735 as st7735        # pylint: disable=unused-import
 import adafruit_rgb_display.ssd1351 as ssd1351      # pylint: disable=unused-import
 import adafruit_rgb_display.ssd1331 as ssd1331      # pylint: disable=unused-import
+import adafruit_focaltouch
 
+# Create library object (named "ft") using a Bus I2C port using pin 27 (data) and 28 (clk)
+i2c = busio.I2C(board.SCL, board.SDA)
+
+ft = adafruit_focaltouch.Adafruit_FocalTouch(i2c, debug=False)
 # Configuration for CS and DC pins (these are PiTFT defaults):
 cs_pin = digitalio.DigitalInOut(board.CE0)
 dc_pin = digitalio.DigitalInOut(board.D25)
@@ -72,3 +78,4 @@ image = image.crop((x, y, x + width, y + height))
 
 # Display image.
 disp.image(image)
+
