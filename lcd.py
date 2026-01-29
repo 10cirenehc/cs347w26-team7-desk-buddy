@@ -1,6 +1,7 @@
 import digitalio
 import board
 import busio
+import time
 from PIL import Image, ImageDraw
 import adafruit_rgb_display.ili9341 as ili9341
 import adafruit_rgb_display.st7789 as st7789        # pylint: disable=unused-import
@@ -11,7 +12,7 @@ import adafruit_rgb_display.ssd1331 as ssd1331      # pylint: disable=unused-imp
 import adafruit_focaltouch
 
 # Create library object (named "ft") using a Bus I2C port using pin 27 (data) and 28 (clk)
-i2c = busio.I2C(board.SCL, board.SDA)
+i2c = busio.I2C(board.SCL_1, board.SDA_1)
 
 ft = adafruit_focaltouch.Adafruit_FocalTouch(i2c, debug=False)
 # Configuration for CS and DC pins (these are PiTFT defaults):
@@ -24,6 +25,7 @@ BAUDRATE = 24000000
 
 # Setup SPI bus using hardware SPI:
 spi = board.SPI()
+
 
 # pylint: disable=line-too-long
 # Create the display:
@@ -78,4 +80,13 @@ image = image.crop((x, y, x + width, y + height))
 
 # Display image.
 disp.image(image)
+
+while True:
+    # if the screen is being touched print the touches
+    if ft.touched:
+        print(ft.touches)
+    else:
+        print("no touch")
+
+    time.sleep(0.15)
 
