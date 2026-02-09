@@ -1,4 +1,6 @@
-# Example Project -- using to help calibrate...
+# Example Project
+# Using this example project to calibrate coaster
+# Not actually used by the user...
 import time
 
 import board
