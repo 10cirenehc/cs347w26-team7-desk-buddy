@@ -1,6 +1,7 @@
 data/state_logs/
 data/skeleton_images/
 data/posture_sessions/
+models/
 
 yolov8s.pt
 *.DS_Store

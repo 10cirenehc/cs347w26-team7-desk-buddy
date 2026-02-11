@@ -53,7 +53,7 @@ class PersonDetector:
 
     def __init__(
         self,
-        model_name: str = "yolov8s.pt",
+        model_name: str = "models/yolov8s.pt",
         confidence: float = 0.4,
         device: str = "cpu",
         classes: Optional[List[int]] = None,

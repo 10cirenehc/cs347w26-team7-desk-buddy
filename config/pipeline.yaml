@@ -9,7 +9,7 @@ video_source:
   drop_policy: "latest"  # "latest" drains stale frames; "normal" uses default read()
 
 person_detector:
-  model: "yolov8s.pt"
+  model: "models/yolov8s.pt"
   confidence: 0.25  # Lowered for side-angle detection
   device: "cpu"  # "cuda:0" on Jetson
   classes: [0, 67]  # person + cell phone
