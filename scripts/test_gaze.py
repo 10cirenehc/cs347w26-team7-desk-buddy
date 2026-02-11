@@ -23,7 +23,7 @@ import cv2
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.perception.camera import Camera
+from src.perception.video_source import VideoSource
 from src.perception.gaze_tracker import GazeTracker, AttentionState
 
 
@@ -55,7 +55,7 @@ def main():
     tracker = GazeTracker(config_path=config_path)
 
     print("Opening camera...")
-    camera = Camera(device_id=args.camera)
+    camera = VideoSource(device_id=args.camera)
     if not camera.open():
         print("Error: Could not open camera")
         return 1

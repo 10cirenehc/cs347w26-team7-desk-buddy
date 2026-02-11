@@ -1,238 +1,379 @@
-# Desk Buddy - Perception Layer
+# Desk Buddy - Voice-Enabled Posture & Focus Assistant
 
-## Quick Start (Current Prototype)
+## Quick Start
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-python scripts/run_perception.py
+
+# For voice features (macOS: run pyobjc-core first)
+pip install pyobjc-core
+pip install -r requirements-voice.txt
+
+# Run the full assistant
+python -m src.main
+
+# Run without voice (perception only)
+python -m src.main --no-voice
+
+# Run without desk control
+python -m src.main --no-desk
+
+# Skip calibration (use saved profile)
+python -m src.main --skip-calibration
 ```
 
-## Current Prototype Structure
+On first run:
+1. Downloads YOLOv8s (~22 MB) and MediaPipe models
+2. Runs 10-second calibration — sit with **good** posture
+3. Begins tracking with voice commands enabled
 
+### LLM Setup (Optional)
+
+For the AI agent to work beyond simulation mode:
+
+```bash
+# Install llama-cpp-python
+pip install llama-cpp-python
+
+# With Metal GPU (macOS):
+CMAKE_ARGS="-DLLAMA_METAL=on" pip install llama-cpp-python
+
+# With CUDA (Linux):
+CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python
 ```
-cs347w26-team7-desk-buddy/
-├── requirements.txt
-├── config/thresholds.yaml
-├── src/perception/
-│   ├── camera.py               # Webcam capture utility
-│   ├── posture_detector.py     # MediaPipe Pose + rule-based classification
-│   ├── phone_detector.py       # YOLOv8 phone detection
-│   ├── gaze_tracker.py         # MediaPipe Face Mesh + solvePnP head pose
-│   └── focus_estimator.py      # Signal fusion into focus state
-└── scripts/
-    ├── test_posture.py
-    ├── test_phone_detection.py
-    ├── test_gaze.py
-    └── run_perception.py
-```
 
-### Prototype Limitations
-
-1. **Rule-based posture classification is fragile** - geometric thresholds on landmarks don't generalize across camera angles or body types
-2. **Gaze tracking assumes frontal camera** - solvePnP head pose only works when camera faces the user
-3. **Single-person only**
-4. **MediaPipe pose detection is noisy** for seated upper-body views
-5. **No occlusion handling**
+Download a GGUF model (e.g., Llama 3.1 8B) to `~/models/` or `./models/`.
 
 ---
 
-## Target Architecture: LAViTSPose-Inspired Pipeline on AGX Orin
-
-Based on [LAViTSPose](https://www.mdpi.com/1099-4300/27/12/1196) (MDPI Entropy, Nov 2025), a cascaded detection-segmentation-classification framework designed specifically for multi-person sitting posture recognition under occlusion.
-
-### Why LAViTSPose is the Right Model
-
-LAViTSPose solves our exact problem:
-- Multi-person sitting posture recognition in classrooms/offices
-- Handles occlusion (desks, chairs, overlapping people)
-- Works from arbitrary camera angles (classifies skeleton images, not raw geometry)
-- Lightweight enough for real-time on edge devices
-- Three-stage cascade suppresses errors at each stage
-
-### Key Insight: Classify Skeletons, Not Geometry
-
-Our current approach computes angles/distances from landmarks and applies thresholds. This is fragile because:
-- Thresholds don't generalize across camera angles
-- Small landmark noise causes state flicker
-- Can't distinguish subtle posture variations
-
-LAViTSPose instead:
-1. Extracts skeleton keypoints
-2. Renders them as a **binary skeleton image** (rectangle-based, not thin lines)
-3. Feeds the skeleton image to a **trained ViT classifier**
-
-This abstracts away camera perspective - the classifier learns posture from structural shape, not raw coordinates.
-
-### Proposed Pipeline for Desk Buddy on AGX Orin
+## System Architecture
 
 ```
-Camera Frame (640x480 or higher)
+┌─────────────────────────────────────────────────────────────────┐
+│                      DESK BUDDY ASSISTANT                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌──────────────┐     ┌──────────────┐     ┌──────────────┐    │
+│  │   PERCEPTION │     │  STATE LOG   │     │    AGENT     │    │
+│  │   PIPELINE   │────►│   SYSTEM     │────►│   (LLM)      │    │
+│  │              │     │              │     │              │    │
+│  │ • Posture    │     │ • History    │     │ • Llama 8B   │    │
+│  │ • Gaze       │     │ • Events     │     │ • Reasoning  │    │
+│  │ • Phone      │     │ • Summaries  │     │ • Decisions  │    │
+│  │ • Focus      │     │              │     │              │    │
+│  └──────────────┘     └──────────────┘     └──────┬───────┘    │
+│                                                    │            │
+│                              ┌─────────────────────┘            │
+│                              ▼                                  │
+│  ┌──────────────┐     ┌──────────────┐     ┌──────────────┐    │
+│  │    VOICE     │     │   ALERT      │     │    VOICE     │    │
+│  │    INPUT     │────►│   ENGINE     │────►│   OUTPUT     │    │
+│  │              │     │              │     │              │    │
+│  │ • Wake word  │     │ • Rules      │     │ • Piper TTS  │    │
+│  │ • Whisper    │     │ • Desk ctrl  │     │ • Speaker    │    │
+│  └──────────────┘     └──────────────┘     └──────────────┘    │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Project Structure
+
+```
+cs347w26-team7-desk-buddy/
+├── requirements.txt              # Core dependencies
+├── requirements-voice.txt        # Voice/LLM dependencies
+├── config/pipeline.yaml          # Unified config
+├── data/
+│   ├── calibration_profile.json  # Auto-generated calibration
+│   ├── state_logs/               # Session state logs (JSONL)
+│   ├── posture_sessions/         # Training data
+│   └── trained_models/           # Classifier artifacts
+│
+├── src/
+│   ├── __init__.py
+│   ├── main.py                   # ★ Unified entry point
+│   │
+│   ├── perception/               # Computer vision pipeline
+│   │   ├── video_source.py       # Webcam with frame-drop
+│   │   ├── person_detector.py    # YOLOv8s person + phone
+│   │   ├── primary_tracker.py    # ByteTrack + sticky selection
+│   │   ├── pose_estimator.py     # MediaPipe Pose (33 landmarks)
+│   │   ├── posture_features.py   # 7-feature vector extraction
+│   │   ├── calibration.py        # Z-score normalization
+│   │   ├── posture_model.py      # LogisticRegression classifier
+│   │   ├── posture_state.py      # EWMA + hysteresis state machine
+│   │   ├── gaze_tracker.py       # Head pose via solvePnP
+│   │   ├── focus_estimator.py    # Multi-signal focus fusion
+│   │   ├── presence_detector.py  # Seated/standing/away detection
+│   │   ├── state_logger.py       # ★ StateSnapshot logging
+│   │   ├── state_history.py      # ★ Ring buffer + query API
+│   │   ├── state_summarizer.py   # ★ NL summaries for agent
+│   │   └── skeleton_renderer.py  # LAViTSPose-style rendering
+│   │
+│   ├── voice/                    # ★ Voice I/O module
+│   │   ├── audio_manager.py      # Mic/speaker handling
+│   │   ├── wake_word.py          # OpenWakeWord ("Hey Jarvis")
+│   │   ├── speech_to_text.py     # Whisper ASR
+│   │   └── text_to_speech.py     # Piper TTS
+│   │
+│   ├── desk/                     # ★ BLE desk control
+│   │   └── desk_client.py        # Async sit/stand/nudge
+│   │
+│   └── agent/                    # ★ LLM agent module
+│       ├── llm_client.py         # Llama 3.1 8B (llama.cpp)
+│       ├── agent_core.py         # Query processing + intents
+│       ├── focus_session.py      # Smart productivity timer
+│       └── alert_engine.py       # Adaptive rules + desk actions
+│
+└── scripts/
+    ├── run_pipeline.py           # Legacy perception-only demo
+    ├── collect_posture_sessions.py
+    ├── train_posture.py
+    └── test_gaze.py
+```
+
+---
+
+## Voice Commands
+
+**Wake word:** "Hey Jarvis" (configurable in `config/pipeline.yaml`)
+
+| Command | Response |
+|---------|----------|
+| "How's my posture?" | Current posture status with specific feedback |
+| "How long have I been slouching?" | Duration in bad posture state |
+| "Start a focus session" | Begins 25-min Pomodoro timer |
+| "Start a 50 minute focus" | Custom duration focus session |
+| "Take a break" | Starts break, may lower desk |
+| "How am I doing?" | Overall status summary |
+| "End session" | Ends focus session with stats |
+| "Stand up" / "Sit down" | Moves desk (if connected) |
+| "Give me a posture tip" | Random ergonomic advice |
+
+---
+
+## State Logging & History API
+
+The `StateLogger` captures perception state at ~1 Hz for agent context and queries.
+
+```python
+from src.perception import StateLogger
+
+logger = StateLogger()
+logger.start_session()
+
+# In perception loop:
+logger.log(posture=posture, gaze=gaze, focus=focus, ...)
+
+# Query history:
+history = logger.get_history()
+history.duration_in_state("posture", "bad")           # seconds in current state
+history.state_ratio("focus", "focused", 300)          # % focused in last 5 min
+history.get_trend("posture_smoothed_prob", 300)       # trend analysis
+history.get_summary(3600)                              # full summary dict
+```
+
+### StateSnapshot Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `posture_state` | str | "good" / "bad" / "unknown" |
+| `posture_raw_prob` | float | Raw p_bad from classifier |
+| `posture_smoothed_prob` | float | EWMA-smoothed probability |
+| `torso_pitch` | float | Forward lean angle (degrees) |
+| `forward_lean_z` | float | Shoulder-hip depth difference |
+| `gaze_pitch/yaw/roll` | float | Head pose angles |
+| `attention_state` | str | "focused" / "looking_away" / "looking_down" |
+| `phone_detected` | bool | Phone in hand |
+| `presence_state` | str | "seated" / "standing" / "away" |
+| `focus_state` | str | "focused" / "distracted" / "away" |
+| `focus_factors` | list | Contributing factors |
+
+---
+
+## Focus Sessions
+
+The `FocusSessionManager` provides Pomodoro-style timers with adaptive suggestions.
+
+```python
+from src.agent import FocusSessionManager
+
+session = FocusSessionManager(history)
+session.start_focus(duration_min=25)
+
+# In main loop:
+suggestion = session.check_and_suggest()
+if suggestion:
+    tts.speak(suggestion.message)
+
+# Adaptive features:
+# - Early break suggestion if focus degrades
+# - Posture warnings during session
+# - Session completion summaries with stats
+```
+
+---
+
+## Adaptive Alerts
+
+The `AlertEngine` triggers voice and desk actions based on rules:
+
+| Rule | Condition | Action |
+|------|-----------|--------|
+| `focus_posture_degrading` | >60% bad posture in 5 min | Silent desk nudge |
+| `focus_severe_slouch` | 15 min continuous bad | Stand desk + voice |
+| `idle_bad_posture` | 10 min bad (not in focus) | Stand desk + voice |
+| `sitting_too_long` | 1 hour seated | Voice reminder |
+| `standing_too_long` | 45 min standing | Voice reminder |
+| `good_posture_streak` | 30 min good posture | Encouragement |
+| `phone_distraction` | 2 min phone during focus | Voice nudge |
+
+Rules adapt based on session context (gentler during focus sessions).
+
+---
+
+## Configuration
+
+All settings in `config/pipeline.yaml`:
+
+```yaml
+# State logging
+state_logger:
+  log_interval_seconds: 1.0
+  output_dir: "data/state_logs"
+  max_memory_snapshots: 3600
+
+# Voice I/O
+voice:
+  wake_word:
+    phrase: "hey_jarvis"  # or: alexa, hey_mycroft, ok_google
+    sensitivity: 0.5
+  stt:
+    model: "base"  # tiny, base, small, medium, large-v2
+  tts:
+    voice: "en_US-lessac-medium"
+    speed: 1.0
+
+# LLM Agent
+agent:
+  model: "llama-3.1-8b"
+  max_tokens: 150
+  temperature: 0.7
+
+# Alerts
+alerts:
+  enabled: true
+  positive_reinforcement: true
+
+# Desk control
+desk:
+  enabled: false  # Enable when sitstand repo available
+  sitstand_path: "../sitstand"
+```
+
+---
+
+## Perception Pipeline
+
+```
+Camera Frame (640×480)
     │
-    ▼
-┌─────────────────────────────────────────────┐
-│ Stage 1: PERSON DETECTION + TRACKING        │
-│                                             │
-│  YOLOv8m/l + BoT-SORT                      │
-│  - Detect all people in frame               │
-│  - Stable person IDs across frames          │
-│  - RaIoU-style loss for tight crops         │
-│  - TensorRT optimized                       │
-│  - Also detect phones (COCO class 67)       │
-└──────────────┬──────────────────────────────┘
-               │ Per-person ROI crops
-               ▼
-┌─────────────────────────────────────────────┐
-│ Stage 2: PER-PERSON PARSING                 │
-│                                             │
-│  2a. Segmentation (ESBody-style)            │
-│      - Remove cross-person leakage (Reno)   │
-│      - Estimate occlusion + head orient.    │
-│      - Route to HB/WB classification branch │
-│                                             │
-│  2b. Pose Estimation                        │
-│      RTMPose-l or ViTPose-B                 │
-│      - Extract skeleton keypoints           │
-│      - Render rectangle-based skeleton      │
-│      - TensorRT optimized                   │
-│                                             │
-│  2c. Gaze Estimation                        │
-│      L2CS-Net (ResNet50) or Gaze360         │
-│      - Face crop → pitch/yaw prediction     │
-│      - Works from any camera angle           │
-│      - No solvePnP needed                   │
-└──────────────┬──────────────────────────────┘
-               │ Skeleton image + gaze + phone + occlusion cues
-               ▼
-┌─────────────────────────────────────────────┐
-│ Stage 3: CLASSIFICATION + FUSION            │
-│                                             │
-│  3a. Posture Classification (MLiT-style)    │
-│      - Skeleton image → ViT classifier      │
-│      - SDC for local inductive bias         │
-│      - Learnable temperature for stability  │
-│      - HB/WB branches for occluded cases    │
-│      Output: posture category per person    │
-│                                             │
-│  3b. Focus State Fusion                     │
-│      - Posture state (good/slouch/lean/...) │
-│      - Gaze direction (at screen / away)    │
-│      - Phone detected near person           │
-│      - Head orientation from ESBody         │
-│      - Temporal smoothing                   │
-│      Output: FOCUSED / DISTRACTED / AWAY    │
-└─────────────────────────────────────────────┘
+    ├─[every Nth frame]─► PersonDetector (YOLOv8s)
+    │                         │
+    │                         ▼
+    │                     PrimaryTracker (ByteTrack)
+    │                         │
+    │                         ▼
+    ├─[every frame]──────► PoseEstimator (MediaPipe 33 landmarks)
+    │                         │
+    │                         ▼
+    │                     extract_features() → PostureFeatures (7D)
+    │                         │
+    │                         ▼
+    │                     CalibrationManager.normalize() → z-scores
+    │                         │
+    │                         ▼
+    │                     PostureClassifier.predict() → p_bad
+    │                         │
+    │                         ▼
+    │                     PostureStateMachine → GOOD / BAD / UNKNOWN
+    │                         │
+    │                         ▼
+    │                     StateLogger.log() → history
+    │                         │
+    │                         ▼
+    └────────────────────► FocusEstimator → FOCUSED / DISTRACTED / AWAY
+                              │
+                              ▼
+                          AlertEngine.check() → voice/desk actions
 ```
 
-### Component Selection for AGX Orin (275 TOPS)
+### PostureFeatures (7D Vector)
 
-| Component | Model | Why | Params | Est. Speed on Orin |
-|-----------|-------|-----|--------|-------------------|
-| Person Detection | YOLOv8l or YOLOv11l | Accurate, TensorRT native | ~43M | 100+ FPS |
-| Multi-Person Tracking | BoT-SORT | Best MOTA/IDF1 on MOT17, re-ID capable | minimal | adds ~5ms |
-| Person Segmentation | BodyPix 2.0 (MobileNet) or SAM2-tiny | ESBody uses BodyPix; SAM2 for higher quality | 4-39M | 60-90 FPS |
-| Pose Estimation | RTMPose-l | 75.8 AP on COCO, 130+ FPS on GPU | ~28M | 200+ FPS |
-| Skeleton Rendering | Custom (rectangle-based) | LAViTSPose approach, width ω=4 | none | <1ms |
-| Posture Classifier | MLiT (compact ViT) | SDC + learnable temp, small-data friendly | ~5-10M | 500+ FPS |
-| Gaze Estimation | L2CS-Net (ResNet50) | 3.92° on MPIIGaze, works unconstrained | ~25M | 100+ FPS |
-| Phone Detection | YOLOv8l (shared with person det.) | COCO class 67, same model | shared | shared |
+| Feature | Description |
+|---------|-------------|
+| `torso_pitch` | Hip→shoulder angle vs vertical (degrees) |
+| `head_forward_ratio` | Ear-shoulder offset / shoulder width |
+| `shoulder_roll` | Shoulder line tilt (degrees) |
+| `lateral_lean` | Horizontal offset / shoulder width |
+| `head_tilt` | Ear line tilt (degrees) |
+| `avg_visibility` | Mean landmark visibility |
+| `forward_lean_z` | Shoulder z - hip z (negative = forward) |
 
-**Total estimated per-frame latency on AGX Orin with TensorRT: ~25-40ms (25-40 FPS)**
+---
 
-This is well within real-time for multi-person scenes. With all models converted to TensorRT FP16, the AGX Orin has ample headroom.
+## Hardware Requirements
 
-### LAViTSPose Concepts to Adopt
+### Development (MacBook/Desktop)
+- Webcam
+- Microphone (for voice commands)
+- ~4GB RAM for perception
+- ~8GB additional for LLM (Llama 8B Q4)
 
-#### 1. RaIoU Loss (Detection)
-- Standard IoU losses produce loose boxes in occluded seated scenes
-- RaIoU adds dataset-derived priors on box width/height/aspect ratio
-- Zero gradient for in-range predictions, Huber penalty for outliers
-- **For us**: Fine-tune YOLO with RaIoU on classroom/office seated data
+### Production (AGX Orin 64GB)
+| Component | VRAM | Notes |
+|-----------|------|-------|
+| Perception | ~2GB | YOLOv8 + MediaPipe |
+| Whisper medium | ~2GB | ASR |
+| Piper TTS | ~500MB | Voice output |
+| Llama 3.1 8B (Q4) | ~6GB | Agent reasoning |
+| **Total** | **~10-12GB** | Plenty of headroom |
 
-#### 2. ESBody: Reno + APF (Segmentation)
-- **Reno**: Suppresses boundary-connected foreground from neighboring people. Uses BodyPix foreground mask, filters components touching the ROI boundary that likely belong to adjacent people
-- **APF**: Analyzes body part probabilities to determine lower-body occlusion ratio and coarse head orientation. No training needed - pure geometric heuristics on BodyPix output
-- **Routing**: If lower-body visibility < 15%, route to half-body classifier; otherwise whole-body
-- **For us**: Adopt directly. BodyPix runs on MobileNet, very lightweight
+---
 
-#### 3. Rectangle-Based Skeleton (Pose → Image)
-- Instead of thin lines, limbs rendered as solid rectangles (width ω=4)
-- Enhances structural continuity and feature density
-- More robust to keypoint noise than thin-line skeletons
-- Rendered onto 224×224 canvas with letterbox scaling
-- **For us**: Replace our geometric metrics with skeleton image classification
+## Future: LAViTSPose-Inspired Pipeline
 
-#### 4. MLiT Classifier (Classification)
-- Compact ViT with two key additions:
-  - **SDC (Spatial Displacement Contact)**: Concatenates spatially shifted versions of the input before patch embedding. Injects local inductive bias without convolutions
-  - **Learnable Temperature**: Trainable scalar τ in softmax attention. Stabilizes training on small datasets
-- Two branches: HB (half-body) and WB (whole-body), selected by APF occlusion routing
-- **For us**: Train on sitting posture dataset (USSP or custom-collected)
+Target architecture for multi-person posture recognition on AGX Orin:
 
-### Gaze Estimation: L2CS-Net
+1. **YOLOv8l + BoT-SORT** — Person detection & tracking
+2. **RTMPose-l** — 33-landmark pose estimation
+3. **Rectangle-based skeleton rendering** — ω=4 limb width
+4. **MLiT classifier** — ViT with SDC + learnable temperature
+5. **L2CS-Net** — Direct gaze prediction (replaces solvePnP)
+6. **TensorRT FP16** — All models optimized
 
-Replaces our fragile solvePnP approach. Key advantages:
-- Predicts gaze pitch/yaw directly from a face crop
-- Works from any camera angle (trained on Gaze360 dataset with full 360° coverage)
-- 3.92° mean angular error on MPIIGaze
-- Simple API: `gaze_pipeline.step(frame)` → pitch, yaw per detected face
-- ResNet50 backbone, ONNX/TensorRT exportable
-- [github.com/Ahmednull/L2CS-Net](https://github.com/Ahmednull/L2CS-Net)
-
-For Desk Buddy, gaze direction relative to body orientation (from pose landmarks) gives us angle-independent attention tracking.
-
-### TensorRT Deployment on AGX Orin
-
-All models should be converted to TensorRT for production:
-
-```
-PyTorch model → ONNX export → TensorRT engine (FP16)
-```
-
-- TensorRT provides 3-6x speedup over raw PyTorch on Jetson
-- FP16 inference with negligible accuracy loss
-- Can use DLA (Deep Learning Accelerator) cores on Orin to offload some models, freeing GPU
-- JetPack 6.x includes CUDA, cuDNN, TensorRT pre-installed
-- [NVIDIA TensorRT SDK](https://developer.nvidia.com/tensorrt)
-
-### Data Collection & Training Plan
-
-LAViTSPose was evaluated on the USSP (University Sitting Student Posture) dataset. For Desk Buddy:
-
-1. **Collect classroom/office seated posture data** using the AGX Orin camera
-2. **Annotate posture categories**: Upright, Slouching, Leaning-sideways, Head-on-desk, etc.
-3. **Fine-tune YOLO** with RaIoU loss on seated indoor scenes
-4. **Train MLiT classifier** on skeleton images extracted via RTMPose
-5. **Fine-tune L2CS-Net** on gaze data if needed (pre-trained may suffice)
-
-### Optional: V-JEPA for Activity Understanding
-
-With AGX Orin compute budget, V-JEPA 2 (ViT-L, 300M) can run alongside the main pipeline as a complementary signal:
-- Classify overall activity from short video clips (working, chatting, sleeping, on phone)
-- Self-supervised pre-training means it works without labeled data
-- Complements geometric posture classification with semantic understanding
-- [github.com/facebookresearch/vjepa2](https://github.com/facebookresearch/vjepa2)
+See full LAViTSPose architecture details in the [original plan](./PLAN.md).
 
 ---
 
 ## Development Notes
 
-- MediaPipe requires RGB input; OpenCV reads BGR by default
-- YOLOv8n model auto-downloads on first phone detection run (~6MB)
-- MediaPipe pose/face models auto-download to `src/perception/models/`
-- Focus estimator uses temporal smoothing to prevent state flickering
-- Posture shoulder angle is normalized to handle mirrored webcam views
-- AGX Orin should run JetPack 6.x with DeepStream 7.1 (DeepStream 8.0 is Thor-only)
+- MediaPipe requires RGB input; OpenCV reads BGR
+- Wake word uses OpenWakeWord pre-trained models (custom requires training)
+- LLM runs in simulation mode if llama-cpp-python not installed
+- Desk control requires BLE-enabled standing desk + sitstand repo
+- State logs saved as JSONL in `data/state_logs/`
+- Calibration profile saved to `data/calibration_profile.json`
 
 ## References
 
-- [LAViTSPose](https://www.mdpi.com/1099-4300/27/12/1196) - Lightweight Cascaded Framework for Sitting Posture Recognition (MDPI Entropy, 2025)
-- [L2CS-Net](https://github.com/Ahmednull/L2CS-Net) - Fine-Grained Gaze Estimation in Unconstrained Environments
-- [RTMPose](https://arxiv.org/abs/2303.07399) - Real-Time Multi-Person Pose Estimation
-- [ViTPose](https://github.com/ViTAE-Transformer/ViTPose) - Vision Transformer for Pose Estimation
-- [BoT-SORT](https://github.com/NirAharon/BoT-SORT) - Robust Multi-Pedestrian Tracking
-- [SAM2](https://github.com/facebookresearch/sam2) - Segment Anything Model 2
-- [V-JEPA 2](https://github.com/facebookresearch/vjepa2) - Self-supervised Video Understanding
-- [NVIDIA TensorRT](https://developer.nvidia.com/tensorrt) - Inference Optimization
-- [NVIDIA DeepStream](https://developer.nvidia.com/deepstream-sdk) - Video Analytics Pipeline
+- [LAViTSPose](https://www.mdpi.com/1099-4300/27/12/1196) - Sitting Posture Recognition
+- [L2CS-Net](https://github.com/Ahmednull/L2CS-Net) - Gaze Estimation
+- [faster-whisper](https://github.com/guillaumekln/faster-whisper) - CTranslate2 Whisper
+- [Piper](https://github.com/rhasspy/piper) - Fast TTS
+- [OpenWakeWord](https://github.com/dscripka/openWakeWord) - Wake word detection
+- [llama.cpp](https://github.com/ggerganov/llama.cpp) - Local LLM inference
