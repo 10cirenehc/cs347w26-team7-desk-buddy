@@ -1,7 +1,7 @@
 '''
 Driver for HX711 on Jetson GPIO
-Based on the Arduino library
-https://github.com/bogde/HX711
+Based on the Reference Driver (C)
+in the Datasheet
 '''
 
 import Jetson.GPIO as GPIO
@@ -59,4 +59,6 @@ class HX711:
                   time.sleep(0.01)
             # And re-enable them here!
             
+            # Signed 24-bit
+            value = value ^ 0x800000
             return value
