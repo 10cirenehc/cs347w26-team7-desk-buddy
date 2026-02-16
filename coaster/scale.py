@@ -1,26 +1,14 @@
-# Example Project
-# Using this example project to calibrate coaster
-# Not actually used by the user...
+import Jetson.GPIO as GPIO
 import time
+from hx711 import HX711
 
-import board
-import digitalio
+GPIO.setmode(GPIO.BOARD)
 
-# Using Adafruit CircuitPython HX711 library
-from adafruit_hx711.hx711 import HX711
-from adafruit_hx711.analog_in import AnalogIn
+DT_PIN = 29
+SCK_PIN = 31
 
-# Data Pin
-data = digitalio.DigitalInOut(board.D2)
-data.direction = digitalio.Direction.INPUT
-# Clock Pin
-clock = digitalio.DigitalInOut(board.D3)
-clock.direction = digitalio.Direction.OUTPUT
-
-hx711 = HX711(data, clock)
-# We are using Channel A
-channel_a = AnalogIn(hx711, HX711.CHAN_A_GAIN_128)
+myLoad = HX711(SCK_PIN, DT_PIN, 128)
 
 while True:
-    print(f"Reading: {channel_a.value}")
-    time.sleep(1)
+      print(myLoad.read())
+      time.sleep(1)
