@@ -23,30 +23,20 @@ class HX711:
             return (GPIO.input(self.__dout) == 0)
       
       def set_gain(self, gain):
-            if (gain == 128):
+            if (gain == 128): # Channel A, gain factor 128
                   self.__gpulse = 1
-            elif (gain == 64):
+            elif (gain == 64): # Ch A, gain factor 64
                   self.__gpulse = 3
-            elif (gain == 32): 
+            elif (gain == 32): # Ch B
                   self.__gpulse = 2
-            else:
+            else: # Error
                   self.__gpulse = 0
                   print("Error: Invalid HX711 Gain")
-            # match gain:
-            #       case 128: # Channel A, gain factor 128
-            #             self.__gpulse = 1
-            #       case 64: # Ch A, gain factor 64
-            #             self.__gpulse = 3
-            #       case 32: # Ch B
-            #             self.__gpulse = 2
-            #       case _: # Error
-            #             self.__gpulse = 0
-            #             return "Error: Invalid HX711 Gain"
       
       def read(self):
             value = 0
             # Wait for data to be ready
-            while (self.is_ready != True):
+            while not self.is_ready():
                   pass
 
             # Apply 25~27 positive clock pulses at PD_SCK
@@ -55,6 +45,7 @@ class HX711:
                   GPIO.output(self.__pd_sck, True)
                   # MSB bit shifted out first
                   value = (value << 1) | GPIO.input(self.__dout)
+                  print(value)
                   GPIO.output(self.__pd_sck, False)
             
             # 25th pulse pulls DOUT back to high
@@ -69,5 +60,6 @@ class HX711:
             # And re-enable them here!
             
             # Signed 24-bit
-            value = value ^ 0x800000
+            if value & 0x800000:
+                  value -= 1 << 24
             return value
