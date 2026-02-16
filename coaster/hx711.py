@@ -23,16 +23,25 @@ class HX711:
             return (GPIO.input(self.__dout) == 0)
       
       def set_gain(self, gain):
-            match gain:
-                  case 128: # Channel A, gain factor 128
-                        self.__gpulse = 1
-                  case 64: # Ch A, gain factor 64
-                        self.__gpulse = 3
-                  case 32: # Ch B
-                        self.__gpulse = 2
-                  case _: # Error
-                        self.__gpulse = 0
-                        return "Error: Invalid HX711 Gain"
+            if (gain == 128):
+                  self.__gpulse = 1
+            elif (gain == 64):
+                  self.__gpulse = 3
+            elif (gain == 32): 
+                  self.__gpulse = 2
+            else:
+                  self.__gpulse = 0
+                  print("Error: Invalid HX711 Gain")
+            # match gain:
+            #       case 128: # Channel A, gain factor 128
+            #             self.__gpulse = 1
+            #       case 64: # Ch A, gain factor 64
+            #             self.__gpulse = 3
+            #       case 32: # Ch B
+            #             self.__gpulse = 2
+            #       case _: # Error
+            #             self.__gpulse = 0
+            #             return "Error: Invalid HX711 Gain"
       
       def read(self):
             value = 0
