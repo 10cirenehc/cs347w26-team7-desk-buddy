@@ -4,63 +4,63 @@ flowchart TB
     subgraph PERCEPTION["Perception Pipeline (~30 fps)"]
         direction TB
 
-        CAM["VideoSource\n(Webcam 640x480)"]
-        DET["PersonDetector\n(YOLOv8s)"]
-        TRK["PrimaryTracker\n(ByteTrack)"]
-        POSE["PoseEstimator\n(MediaPipe 33-lm)"]
+        CAM["VideoSource<br/>(Webcam 640x480)"]
+        DET["PersonDetector<br/>(YOLOv8s)"]
+        TRK["PrimaryTracker<br/>(ByteTrack)"]
+        POSE["PoseEstimator<br/>(MediaPipe 33-lm)"]
         FEAT["extract_features()"]
-        PHONE_CHK{{"Phone-Person\nOverlap Check"}}
+        PHONE_CHK{{"Phone-Person<br/>Overlap Check"}}
 
         subgraph POSTURE_PATH["Posture Classification"]
             direction TB
-            CNN_CHK{"CNN model\navailable?"}
+            CNN_CHK{"CNN model<br/>available?"}
             subgraph CNN_PATH["CNN Path"]
-                SKEL["render_skeleton()\n(224x224 image)"]
-                CNN["PostureCNN\n(predict_proba)"]
+                SKEL["render_skeleton()<br/>(224x224 image)"]
+                CNN["PostureCNN<br/>(predict_proba)"]
             end
             subgraph LR_PATH["LogReg Path"]
-                CAL["CalibrationManager\n.normalize()"]
-                CLF["PostureClassifier\n.predict()"]
+                CAL["CalibrationManager<br/>.normalize()"]
+                CLF["PostureClassifier<br/>.predict()"]
             end
-            PSM["PostureStateMachine\n(EWMA + hysteresis)"]
+            PSM["PostureStateMachine<br/>(EWMA + hysteresis)"]
         end
 
-        PRES["PresenceDetector\n.detect()"]
-        FOCUS["FocusEstimator\n.estimate()"]
+        PRES["PresenceDetector<br/>.detect()"]
+        FOCUS["FocusEstimator<br/>.estimate()"]
 
         %% Perception edges
-        CAM -- "BGR frame\n(480,640,3)" --> DET
-        DET -- "List[BBox]\n(persons)" --> TRK
-        DET -. "List[BBox]\n(phones)" .-> PHONE_CHK
-        TRK -- "TrackedPerson\n(.bbox)" --> POSE
+        CAM -- "BGR frame<br/>(480,640,3)" --> DET
+        DET -- "List[BBox]<br/>(persons)" --> TRK
+        DET -. "List[BBox]<br/>(phones)" .-> PHONE_CHK
+        TRK -- "TrackedPerson<br/>(.bbox)" --> POSE
         CAM -- "BGR frame" --> POSE
-        POSE -- "PoseKeypoints\n(33,4)" --> FEAT
+        POSE -- "PoseKeypoints<br/>(33,4)" --> FEAT
         POSE -- "PoseKeypoints" --> PRES
-        FEAT -- "PostureFeatures\n(7D vector)" --> CNN_CHK
+        FEAT -- "PostureFeatures<br/>(7D vector)" --> CNN_CHK
 
         CNN_CHK -- "Yes" --> SKEL
         SKEL -- "Tensor" --> CNN
         CNN -- "p_bad" --> PSM
         CNN_CHK -- "No" --> CAL
-        CAL -- "np.ndarray(7,)\n(z-scores)" --> CLF
-        CLF -- "PostureClassification\n(.p_bad)" --> PSM
+        CAL -- "np.ndarray(7,)<br/>(z-scores)" --> CLF
+        CLF -- "PostureClassification<br/>(.p_bad)" --> PSM
         FEAT -. "avg_visibility" .-> PSM
 
         TRK -. "primary_bbox" .-> PHONE_CHK
 
         PSM -- "SmoothedPostureState" --> FOCUS
         PRES -- "PresenceResult" --> FOCUS
-        PHONE_CHK -- "phone_detected\nbool" --> FOCUS
+        PHONE_CHK -- "phone_detected<br/>bool" --> FOCUS
     end
 
     %% ──────────────── STATE LOGGING ────────────────
     subgraph STATE["State Logging & History"]
         direction LR
-        SLOG["StateLogger\n.log() @ 1 Hz"]
-        RING["Ring Buffer\n(max 3600 snapshots)"]
-        EVENTS["Event Log\n(state transitions)"]
-        HIST["StateHistory\n(query API)"]
-        JSONL[("JSONL File\ndata/state_logs/")]
+        SLOG["StateLogger<br/>.log() @ 1 Hz"]
+        RING["Ring Buffer<br/>(max 3600 snapshots)"]
+        EVENTS["Event Log<br/>(state transitions)"]
+        HIST["StateHistory<br/>(query API)"]
+        JSONL[("JSONL File<br/>data/state_logs/")]
 
         SLOG --> RING
         SLOG --> EVENTS
@@ -79,22 +79,22 @@ flowchart TB
     %% ──────────────── VOICE I/O ────────────────
     subgraph VOICE["Voice I/O"]
         direction TB
-        MIC["AudioManager\n(16kHz mono, PyAudio)"]
-        WW["WakeWordDetector\n(OpenWakeWord)"]
-        STT["SpeechToText\n(faster-whisper)"]
-        TTS["TextToSpeech\n(Piper / macOS say)"]
+        MIC["AudioManager<br/>(16kHz mono, PyAudio)"]
+        WW["WakeWordDetector<br/>(OpenWakeWord)"]
+        STT["SpeechToText<br/>(faster-whisper)"]
+        TTS["TextToSpeech<br/>(Piper / macOS say)"]
 
-        MIC -- "int16 chunks\n(1280 samples)" --> WW
-        WW -- "wake detected\n(bool)" --> STT
+        MIC -- "int16 chunks<br/>(1280 samples)" --> WW
+        WW -- "wake detected<br/>(bool)" --> STT
         MIC -- "audio stream" --> STT
     end
 
     %% ──────────────── AGENT ────────────────
     subgraph AGENT["Agent"]
         direction TB
-        CORE["DeskBuddyAgent\n.process_query()"]
-        INTENT["Intent Matching\n(20 regex patterns)"]
-        LLM["LLMClient\n(Llama 3.1 8B / sim)"]
+        CORE["DeskBuddyAgent<br/>.process_query()"]
+        INTENT["Intent Matching<br/>(20 regex patterns)"]
+        LLM["LLMClient<br/>(Llama 3.1 8B / sim)"]
 
         CORE --> INTENT
         INTENT -- "no match" --> LLM
@@ -103,8 +103,8 @@ flowchart TB
     %% ──────────────── FOCUS SESSION ────────────────
     subgraph SESSION["Focus Session"]
         direction TB
-        FSM["FocusSessionManager\n.check_and_suggest()"]
-        STATS["SessionStats\n(focus_ratio, posture)"]
+        FSM["FocusSessionManager<br/>.check_and_suggest()"]
+        STATS["SessionStats<br/>(focus_ratio, posture)"]
 
         FSM --> STATS
     end
@@ -112,8 +112,8 @@ flowchart TB
     %% ──────────────── ALERT ENGINE ────────────────
     subgraph ALERTS["Adaptive Alerts (every 1s)"]
         direction TB
-        AE["AlertEngine\n.check_and_execute()"]
-        RULES["7 Alert Rules\n(ratio-based conditions)"]
+        AE["AlertEngine<br/>.check_and_execute()"]
+        RULES["7 Alert Rules<br/>(ratio-based conditions)"]
         COOL["Cooldown Manager"]
         PRIO["Priority Selector"]
 
@@ -125,8 +125,8 @@ flowchart TB
     %% ──────────────── DESK CONTROL ────────────────
     subgraph DESK["Desk Control"]
         direction TB
-        DC["DeskClient\n(BLE GATT)"]
-        HW[("Standing Desk\n(BLE)")]
+        DC["DeskClient<br/>(BLE GATT)"]
+        HW[("Standing Desk<br/>(BLE)")]
 
         DC <--> HW
     end
@@ -134,31 +134,31 @@ flowchart TB
     %% ──────────────── CROSS-MODULE CONNECTIONS ────────────────
 
     %% Voice → Agent flow
-    STT -- "TranscriptionResult\n(.text)" --> CORE
+    STT -- "TranscriptionResult<br/>(.text)" --> CORE
     CORE -- "response text" --> TTS
-    CORE -. "pending desk\naction" .-> DC
+    CORE -. "pending desk<br/>action" .-> DC
 
     %% History feeds agent, alerts, session
     HIST -- "context dict" --> LLM
-    HIST -- "state_ratio()\nduration_in_state()" --> AE
+    HIST -- "state_ratio()<br/>duration_in_state()" --> AE
     HIST -- "state_ratio()" --> FSM
 
     %% Alert engine outputs
     PRIO -- "voice message" --> TTS
-    PRIO -- "desk command\n(stand/nudge)" --> DC
+    PRIO -- "desk command<br/>(stand/nudge)" --> DC
 
     %% Focus session outputs
-    FSM -- "SessionSuggestion\n(.message)" --> TTS
+    FSM -- "SessionSuggestion<br/>(.message)" --> TTS
 
     %% Session context to alerts
-    FSM -. "is_active\n(session context)" .-> AE
+    FSM -. "is_active<br/>(session context)" .-> AE
 
     %% Agent controls session
     INTENT -- "start/end/skip" --> FSM
 
     %% ──────────────── DISPLAY ────────────────
     subgraph DISPLAY["Display"]
-        OVL["_draw_overlay()\n+ cv2.imshow()"]
+        OVL["_draw_overlay()<br/>+ cv2.imshow()"]
     end
 
     PSM -. "posture" .-> OVL
