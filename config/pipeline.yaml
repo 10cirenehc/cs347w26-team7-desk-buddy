@@ -56,10 +56,10 @@ state_logger:
 # Voice I/O configuration
 voice:
   wake_word:
-    phrase: "hey_jarvis"  # Available: hey_jarvis, alexa, hey_mycroft, ok_google
+    phrase: "hey_mycroft"  # Available: hey_jarvis, alexa, hey_mycroft, ok_google
     sensitivity: 0.5
   stt:
-    model: "base"  # tiny, base, small, medium, large-v2
+    model: "small"  # tiny, base, small, medium, large-v2
     language: "en"
   tts:
     voice: "en_US-lessac-medium"
@@ -80,7 +80,7 @@ alerts:
 
 # Desk control configuration
 desk:
-  enabled: false  # Set to true when sitstand repo is available
+  enabled: true
   sitstand_path: "../sitstand"
   auto_stand_on_bad_posture: true
   nudge_on_prolonged_sitting: true

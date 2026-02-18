@@ -1,7 +1,7 @@
 """
-Text-to-speech using Piper TTS.
+Text-to-speech with Piper TTS and macOS 'say' fallback.
 
-Provides fast, natural-sounding voice output for assistant responses.
+Provides voice output for assistant responses.
 """
 
 import logging
@@ -28,22 +28,21 @@ class VoiceInfo:
 
 class TextToSpeech:
     """
-    Text-to-speech using Piper TTS.
+    Text-to-speech with Piper TTS and macOS 'say' fallback.
 
-    Provides fast, natural-sounding voice synthesis for assistant responses.
+    Tries backends in order:
+    1. Piper Python API (if voice model is found/downloadable)
+    2. Piper CLI
+    3. macOS 'say' command (always available on macOS)
 
     Usage:
         tts = TextToSpeech(voice="en_US-lessac-medium")
 
-        # Blocking speech
-        tts.speak("Hello, how can I help you?")
+        # Non-blocking (default) — won't freeze the main loop
+        tts.speak("Hello!")
 
-        # Non-blocking speech
-        tts.speak_async("Processing your request...")
-
-        # Get audio for custom playback
-        audio = tts.synthesize("Some text")
-        audio_manager.play_audio(audio)
+        # Blocking — wait until speech finishes
+        tts.speak("Hello!", blocking=True)
     """
 
     # Popular Piper voices
@@ -82,88 +81,82 @@ class TextToSpeech:
         models_dir: Optional[str] = None,
         audio_manager=None,
     ):
-        """
-        Initialize text-to-speech.
-
-        Args:
-            voice: Voice model name (see VOICES)
-            speed: Speech speed multiplier (0.5 = slow, 1.0 = normal, 2.0 = fast)
-            models_dir: Directory for voice models
-            audio_manager: AudioManager for playback (optional)
-        """
         self.voice = voice
         self.speed = speed
         self.models_dir = Path(models_dir) if models_dir else Path.home() / ".local" / "share" / "piper"
         self.audio_manager = audio_manager
 
-        self._piper_available = False
+        self._backend: Optional[str] = None  # "piper_python", "piper_cli", "say"
         self._voice_path: Optional[Path] = None
         self._speaking = False
         self._speak_thread: Optional[threading.Thread] = None
 
-        # Initialize Piper
-        self._init_piper()
+        self._init_backend()
 
-    def _init_piper(self) -> bool:
-        """Initialize Piper TTS."""
-        # Check if piper is installed
+    def _init_backend(self) -> None:
+        """Detect and initialize the best available TTS backend."""
+
+        # 1. Try Piper Python API
+        try:
+            import piper
+            # Try to load voice — will fail fast if model not found
+            self._voice_path = self._find_voice_model()
+            if self._voice_path:
+                self._backend = "piper_python"
+                logger.info(f"TTS backend: Piper Python (voice: {self._voice_path})")
+                return
+            else:
+                logger.info("Piper Python available but voice model not found locally")
+        except ImportError:
+            pass
+
+        # 2. Try Piper CLI
         try:
             result = subprocess.run(
-                ["piper", "--help"],
-                capture_output=True,
-                text=True,
+                ["piper", "--version"],
+                capture_output=True, text=True, timeout=5,
             )
             if result.returncode == 0:
-                self._piper_available = True
-                logger.info("Piper TTS available (CLI)")
-            else:
-                logger.warning("Piper CLI not working properly")
-        except FileNotFoundError:
-            logger.warning("Piper CLI not found. Trying Python module...")
+                self._backend = "piper_cli"
+                logger.info("TTS backend: Piper CLI")
+                return
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
 
-            # Try Python module
-            try:
-                import piper
-                self._piper_available = True
-                logger.info("Piper TTS available (Python module)")
-            except ImportError:
-                logger.warning("Piper TTS not installed. Voice output disabled.")
-                logger.warning("Install with: pip install piper-tts")
-                return False
+        # 3. macOS 'say' fallback
+        try:
+            result = subprocess.run(
+                ["say", ""],
+                capture_output=True, timeout=3,
+            )
+            self._backend = "say"
+            logger.info("TTS backend: macOS 'say'")
+            return
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
 
-        # Check for voice model
-        self._voice_path = self._find_voice_model()
-        if self._voice_path:
-            logger.info(f"Using voice model: {self._voice_path}")
-        else:
-            logger.warning(f"Voice model not found: {self.voice}")
-            logger.info("Voice models will be downloaded on first use")
-
-        return self._piper_available
+        logger.warning("No TTS backend available. Voice output disabled.")
 
     def _find_voice_model(self) -> Optional[Path]:
         """Find voice model file."""
-        # Check common locations
         search_paths = [
             self.models_dir / f"{self.voice}.onnx",
             self.models_dir / self.voice / f"{self.voice}.onnx",
             Path(f"/usr/share/piper/voices/{self.voice}.onnx"),
             Path.cwd() / "models" / "piper" / f"{self.voice}.onnx",
         ]
-
         for path in search_paths:
             if path.exists():
                 return path
-
         return None
 
-    def speak(self, text: str, blocking: bool = True) -> bool:
+    def speak(self, text: str, blocking: bool = False) -> bool:
         """
         Speak text through speakers.
 
         Args:
             text: Text to speak
-            blocking: Whether to block until speech complete
+            blocking: Whether to block until speech complete (default: False)
 
         Returns:
             True if speech started/completed successfully
@@ -171,131 +164,125 @@ class TextToSpeech:
         if not text.strip():
             return True
 
-        if not self._piper_available:
+        if self._backend is None:
             logger.warning(f"TTS unavailable. Would say: {text}")
             return False
 
         if blocking:
-            return self._speak_blocking(text)
+            return self._speak_impl(text)
         else:
             self.speak_async(text)
             return True
 
-    def _speak_blocking(self, text: str) -> bool:
-        """Speak text (blocking)."""
+    def _speak_impl(self, text: str) -> bool:
+        """Speak text (called from any thread)."""
         self._speaking = True
+        try:
+            if self._backend == "say":
+                return self._speak_say(text)
+            elif self._backend == "piper_python":
+                return self._speak_piper_python(text)
+            elif self._backend == "piper_cli":
+                return self._speak_piper_cli(text)
+            return False
+        except Exception as e:
+            logger.error(f"Error speaking: {e}")
+            return False
+        finally:
+            self._speaking = False
+
+    def _speak_say(self, text: str) -> bool:
+        """Speak using macOS 'say' command."""
+        rate = int(200 * self.speed)
+        result = subprocess.run(
+            ["say", "-r", str(rate), text],
+            capture_output=True,
+        )
+        return result.returncode == 0
+
+    def _speak_piper_python(self, text: str) -> bool:
+        """Speak using Piper Python API."""
+        from piper import PiperVoice
+        from piper.config import SynthesisConfig
+
+        voice = PiperVoice.load(str(self._voice_path))
+        syn_config = SynthesisConfig(length_scale=1.0 / self.speed)
+
+        # synthesize() yields AudioChunk objects with audio_float_array
+        chunks = []
+        for chunk in voice.synthesize(text, syn_config=syn_config):
+            int16_audio = (chunk.audio_float_array * 32767).astype(np.int16)
+            chunks.append(int16_audio)
+
+        audio_np = np.concatenate(chunks) if chunks else np.array([], dtype=np.int16)
+
+        if self.audio_manager:
+            self.audio_manager.play_audio(audio_np, blocking=True)
+        else:
+            self._play_with_system(audio_np)
+        return True
+
+    def _speak_piper_cli(self, text: str) -> bool:
+        """Speak using Piper CLI."""
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            output_path = f.name
 
         try:
-            audio = self.synthesize(text)
-            if audio is None:
-                return False
+            cmd = ["piper", "--model", self.voice, "--output_file", output_path]
+            if self.speed != 1.0:
+                cmd.extend(["--length_scale", str(1.0 / self.speed)])
 
-            # Play audio
+            result = subprocess.run(cmd, input=text, capture_output=True, text=True)
+            if result.returncode != 0:
+                logger.error(f"Piper CLI error: {result.stderr}")
+                # Fall back to say
+                return self._speak_say(text)
+
+            import wave
+            with wave.open(output_path, 'rb') as wf:
+                audio = np.frombuffer(wf.readframes(wf.getnframes()), dtype=np.int16)
+
             if self.audio_manager:
                 self.audio_manager.play_audio(audio, blocking=True)
             else:
                 self._play_with_system(audio)
-
             return True
-
-        except Exception as e:
-            logger.error(f"Error speaking: {e}")
-            return False
-
         finally:
-            self._speaking = False
+            Path(output_path).unlink(missing_ok=True)
 
     def speak_async(self, text: str) -> None:
-        """
-        Speak text without blocking.
-
-        Args:
-            text: Text to speak
-        """
+        """Speak text without blocking."""
         if self._speak_thread and self._speak_thread.is_alive():
-            logger.warning("Already speaking, queuing...")
-            # Could implement a queue here
+            logger.debug("Already speaking, skipping")
+            return
 
         self._speak_thread = threading.Thread(
-            target=self._speak_blocking,
+            target=self._speak_impl,
             args=(text,),
             daemon=True,
         )
         self._speak_thread.start()
 
     def synthesize(self, text: str) -> Optional[np.ndarray]:
-        """
-        Synthesize text to audio array.
-
-        Args:
-            text: Text to synthesize
-
-        Returns:
-            Audio as int16 numpy array, or None on error
-        """
-        if not self._piper_available:
-            return None
-
-        try:
-            # Try Python module first
+        """Synthesize text to audio array (for Piper backends only)."""
+        if self._backend == "piper_python":
             try:
-                import piper
+                from piper import PiperVoice
+                from piper.config import SynthesisConfig
 
-                # Use piper-tts Python API
-                voice = piper.PiperVoice.load(
-                    str(self._voice_path) if self._voice_path else self.voice
-                )
-                audio = voice.synthesize(text, length_scale=1.0 / self.speed)
-                return np.array(audio, dtype=np.int16)
-
-            except (ImportError, Exception) as e:
-                logger.debug(f"Piper Python API not available: {e}")
-                pass
-
-            # Fall back to CLI
-            return self._synthesize_cli(text)
-
-        except Exception as e:
-            logger.error(f"Error synthesizing speech: {e}")
-            return None
-
-    def _synthesize_cli(self, text: str) -> Optional[np.ndarray]:
-        """Synthesize using Piper CLI."""
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-            output_path = f.name
-
-        try:
-            cmd = ["piper", "--model", self.voice, "--output_file", output_path]
-
-            # Add length scale for speed
-            if self.speed != 1.0:
-                cmd.extend(["--length_scale", str(1.0 / self.speed)])
-
-            # Run piper
-            result = subprocess.run(
-                cmd,
-                input=text,
-                capture_output=True,
-                text=True,
-            )
-
-            if result.returncode != 0:
-                logger.error(f"Piper error: {result.stderr}")
-                return None
-
-            # Read output WAV
-            import wave
-            with wave.open(output_path, 'rb') as wf:
-                audio = np.frombuffer(wf.readframes(wf.getnframes()), dtype=np.int16)
-                return audio
-
-        finally:
-            # Clean up temp file
-            Path(output_path).unlink(missing_ok=True)
+                voice = PiperVoice.load(str(self._voice_path))
+                syn_config = SynthesisConfig(length_scale=1.0 / self.speed)
+                chunks = [
+                    (chunk.audio_float_array * 32767).astype(np.int16)
+                    for chunk in voice.synthesize(text, syn_config=syn_config)
+                ]
+                return np.concatenate(chunks) if chunks else np.array([], dtype=np.int16)
+            except Exception as e:
+                logger.error(f"Piper synthesis error: {e}")
+        return None
 
     def _play_with_system(self, audio: np.ndarray) -> None:
         """Play audio using system tools."""
-        # Save to temp file and play with system audio
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
             temp_path = f.name
 
@@ -306,59 +293,39 @@ class TextToSpeech:
 
             with wave.open(temp_path, 'wb') as wf:
                 wf.setnchannels(1)
-                wf.setsampwidth(2)  # 16-bit
+                wf.setsampwidth(2)
                 wf.setframerate(sample_rate)
                 wf.writeframes(audio.tobytes())
 
-            # Try different system players
-            for player in ["aplay", "afplay", "paplay", "play"]:
+            for player in ["afplay", "aplay", "paplay", "play"]:
                 try:
-                    subprocess.run(
-                        [player, temp_path],
-                        capture_output=True,
-                        check=True,
-                    )
+                    subprocess.run([player, temp_path], capture_output=True, check=True)
                     break
                 except (FileNotFoundError, subprocess.CalledProcessError):
                     continue
-
         finally:
             Path(temp_path).unlink(missing_ok=True)
 
     def stop(self) -> None:
         """Stop current speech."""
         self._speaking = False
-        # Would need more sophisticated handling for actual interruption
 
     def list_voices(self) -> List[VoiceInfo]:
         """List available voices."""
-        voices = []
-        for name, info in self.VOICES.items():
-            voices.append(VoiceInfo(
-                name=name,
-                language=info["language"],
-                quality=info["quality"],
-                sample_rate=info["sample_rate"],
-            ))
-        return voices
+        return [
+            VoiceInfo(name=n, language=i["language"], quality=i["quality"], sample_rate=i["sample_rate"])
+            for n, i in self.VOICES.items()
+        ]
 
     def set_voice(self, voice: str) -> bool:
-        """
-        Change the voice.
-
-        Args:
-            voice: New voice name
-
-        Returns:
-            True if voice set successfully
-        """
+        """Change the voice."""
         self.voice = voice
         self._voice_path = self._find_voice_model()
-        return self._voice_path is not None or self._piper_available
+        return self._backend is not None
 
     @property
     def is_available(self) -> bool:
-        return self._piper_available
+        return self._backend is not None
 
     @property
     def is_speaking(self) -> bool:

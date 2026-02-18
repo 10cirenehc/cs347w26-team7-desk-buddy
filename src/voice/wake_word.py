@@ -82,9 +82,15 @@ class WakeWordDetector:
             # OpenWakeWord requires specific models to be downloaded
             # For custom phrases, we'd need to train a custom model
             # For now, use pre-trained models
+            # Download model if missing
+            try:
+                from openwakeword.utils import download_models
+                download_models(model_names=[self.wake_phrase])
+            except Exception as dl_err:
+                logger.debug(f"Model download skipped: {dl_err}")
+
             self._model = Model(
                 wakeword_models=[self.wake_phrase],
-                inference_framework="onnx",  # Use ONNX for better compatibility
             )
 
             logger.info(f"Loaded wake word model: {self.wake_phrase}")

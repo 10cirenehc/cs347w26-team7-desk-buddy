@@ -58,6 +58,7 @@ class DeskBuddyApp:
         enable_voice: bool = True,
         enable_desk: bool = True,
         enable_display: bool = True,
+        demo_mode: bool = False,
     ):
         """
         Initialize Desk Buddy application.
@@ -67,11 +68,13 @@ class DeskBuddyApp:
             enable_voice: Enable voice I/O
             enable_desk: Enable desk control
             enable_display: Show video display
+            demo_mode: Use shortened alert thresholds for demo/presentation
         """
         self.config_path = config_path
         self.enable_voice = enable_voice
         self.enable_desk = enable_desk
         self.enable_display = enable_display
+        self.demo_mode = demo_mode
 
         self.config = load_config(config_path)
         self._running = False
@@ -274,7 +277,7 @@ class DeskBuddyApp:
 
         # Focus session manager
         history = self.state_logger.get_history()
-        self.session = FocusSessionManager(history=history)
+        self.session = FocusSessionManager(history=history, demo_mode=self.demo_mode)
 
         # Main agent
         self.agent = DeskBuddyAgent(
@@ -290,6 +293,7 @@ class DeskBuddyApp:
             desk_client=self.desk,
             tts=self.tts,
             enabled=alerts_config.get('enabled', True),
+            demo_mode=self.demo_mode,
         )
 
     async def _handle_desk_command(self, command: str) -> None:
@@ -560,7 +564,10 @@ class DeskBuddyApp:
 
                 # ----- Display -----
                 if self.enable_display:
-                    display_frame = self._draw_overlay(frame, posture, focus, presence)
+                    display_frame = self._draw_overlay(
+                        frame, posture, focus, presence,
+                        phone_detected, features,
+                    )
                     cv2.imshow("Desk Buddy", display_frame)
 
                     key = cv2.waitKey(1) & 0xFF
@@ -608,35 +615,58 @@ class DeskBuddyApp:
         if self.tts:
             self.tts.speak(response)
 
-    def _draw_overlay(self, frame, posture, focus, presence):
+        # Execute pending desk action if any
+        pending = self.agent.get_pending_desk_action()
+        if pending:
+            await self._handle_desk_command(pending)
+
+    def _draw_overlay(self, frame, posture, focus, presence,
+                       phone_detected=False, features=None):
         """Draw status overlay on frame."""
         display = frame.copy()
-        y_offset = 30
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        h, w = display.shape[:2]
+        y = 30
+
+        # ── Left column: primary status ──
 
         # Posture status
         if posture:
             color = (0, 255, 0) if posture.state.value == "good" else (0, 0, 255)
-            cv2.putText(display, f"Posture: {posture.state.value.upper()}",
-                       (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
-            y_offset += 30
+            label = posture.state.value.upper()
+            cv2.putText(display, f"Posture: {label}", (10, y), font, 0.7, color, 2)
+            y += 25
+            cv2.putText(display, f"p_bad: {posture.raw_prob:.2f}  smooth: {posture.smoothed_prob:.2f}",
+                       (10, y), font, 0.4, (200, 200, 200), 1)
+            y += 18
+            method = "CNN" if self.cnn_model else "LR"
+            cv2.putText(display, f"method: {method}", (10, y), font, 0.4, (200, 200, 200), 1)
+            y += 22
 
         # Focus status
         if focus:
-            colors = {
+            focus_colors = {
                 "focused": (0, 255, 0),
                 "distracted": (0, 0, 255),
                 "away": (128, 128, 128),
             }
-            color = colors.get(focus.state.value, (255, 255, 255))
-            cv2.putText(display, f"Focus: {focus.state.value.upper()}",
-                       (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
-            y_offset += 30
+            color = focus_colors.get(focus.state.value, (255, 255, 255))
+            cv2.putText(display, f"Focus: {focus.state.value.upper()}", (10, y), font, 0.7, color, 2)
+            y += 25
+            factors_str = ", ".join(focus.contributing_factors[:3])
+            cv2.putText(display, f"factors: {factors_str}", (10, y), font, 0.4, (200, 200, 200), 1)
+            y += 22
 
-        # Presence status
+        # Presence
         if presence:
             cv2.putText(display, f"Presence: {presence.state.value}",
-                       (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            y_offset += 20
+                       (10, y), font, 0.5, (255, 255, 255), 1)
+            y += 22
+
+        # Phone
+        if phone_detected:
+            cv2.putText(display, "PHONE DETECTED", (10, y), font, 0.5, (0, 0, 255), 1)
+            y += 22
 
         # Session status
         if self.session and self.session.is_active:
@@ -644,12 +674,75 @@ class DeskBuddyApp:
             remaining = status.get('remaining_min', 0)
             phase = status.get('phase', 'unknown')
             cv2.putText(display, f"Session: {phase} ({remaining:.0f} min left)",
-                       (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-            y_offset += 20
+                       (10, y), font, 0.5, (0, 255, 255), 1)
+            y += 22
+
+        # ── Right column: desk + features ──
+
+        rx = w - 250
+        ry = 30
+
+        # Desk info
+        if self.desk and self.enable_desk:
+            desk_status = self.desk.get_status()
+            desk_color = (0, 255, 0) if desk_status.state.value == "connected" else (128, 128, 128)
+            cv2.putText(display, f"Desk: {desk_status.state.value}",
+                       (rx, ry), font, 0.5, desk_color, 1)
+            ry += 20
+            cv2.putText(display, f"Position: {desk_status.position.value}",
+                       (rx, ry), font, 0.5, (200, 200, 200), 1)
+            ry += 20
+            height = desk_status.height_cm
+            if height is not None:
+                inches = height / 2.54
+                cv2.putText(display, f"Height: {height:.0f}cm / {inches:.1f}in",
+                           (rx, ry), font, 0.5, (200, 200, 200), 1)
+                ry += 20
+            if desk_status.last_command:
+                cv2.putText(display, f"Last cmd: {desk_status.last_command}",
+                           (rx, ry), font, 0.4, (160, 160, 160), 1)
+                ry += 18
+            ry += 10
+
+        # Posture features
+        if features:
+            cv2.putText(display, "Features:", (rx, ry), font, 0.45, (180, 180, 180), 1)
+            ry += 18
+            fwd_color = (0, 0, 255) if features.forward_lean_z < -0.05 else (180, 180, 180)
+            cv2.putText(display, f"pitch: {features.torso_pitch:.1f}  fwd_z: {features.forward_lean_z:.3f}",
+                       (rx, ry), font, 0.38, fwd_color, 1)
+            ry += 16
+            cv2.putText(display, f"head_fwd: {features.head_forward_ratio:.2f}  roll: {features.shoulder_roll:.1f}",
+                       (rx, ry), font, 0.38, (180, 180, 180), 1)
+            ry += 16
+            cv2.putText(display, f"lean: {features.lateral_lean:.2f}  tilt: {features.head_tilt:.1f}",
+                       (rx, ry), font, 0.38, (180, 180, 180), 1)
+            ry += 16
+            cv2.putText(display, f"vis: {features.avg_visibility:.2f}",
+                       (rx, ry), font, 0.38, (180, 180, 180), 1)
+            ry += 20
+
+        # Duration in current states (from history)
+        if self.state_logger:
+            history = self.state_logger.get_history()
+            if posture:
+                dur = history.duration_in_state("posture", posture.state.value)
+                if dur > 0:
+                    m, s = divmod(int(dur), 60)
+                    cv2.putText(display, f"In {posture.state.value}: {m}m{s:02d}s",
+                               (rx, ry), font, 0.4, (180, 180, 180), 1)
+                    ry += 18
+            if focus:
+                dur = history.duration_in_state("focus", focus.state.value)
+                if dur > 0:
+                    m, s = divmod(int(dur), 60)
+                    cv2.putText(display, f"In {focus.state.value}: {m}m{s:02d}s",
+                               (rx, ry), font, 0.4, (180, 180, 180), 1)
+                    ry += 18
 
         # Instructions
         cv2.putText(display, "Press 'q' to quit, 'c' to recalibrate",
-                   (10, display.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (128, 128, 128), 1)
+                   (10, h - 10), font, 0.4, (128, 128, 128), 1)
 
         return display
 
@@ -692,6 +785,7 @@ async def main():
     parser.add_argument("--no-desk", action="store_true", help="Disable desk control")
     parser.add_argument("--no-display", action="store_true", help="Disable video display")
     parser.add_argument("--skip-calibration", action="store_true", help="Skip calibration (use saved)")
+    parser.add_argument("--demo", action="store_true", help="Demo mode with shortened alert thresholds")
     args = parser.parse_args()
 
     # Create app
@@ -700,6 +794,7 @@ async def main():
         enable_voice=not args.no_voice,
         enable_desk=not args.no_desk,
         enable_display=not args.no_display,
+        demo_mode=args.demo,
     )
 
     # Setup

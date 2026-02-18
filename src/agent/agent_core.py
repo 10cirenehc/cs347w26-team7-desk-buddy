@@ -66,8 +66,8 @@ class DeskBuddyAgent:
     # Intent patterns (regex -> intent name)
     INTENT_PATTERNS = [
         # Focus session commands
-        (r"start.*(?:focus|session|pomodoro|timer)", "start_focus"),
         (r"start.*(\d+).*(?:minute|min)", "start_focus_duration"),
+        (r"start.*(?:focus|session|pomodoro|timer)", "start_focus"),
         (r"(?:take|start|need).*break", "start_break"),
         (r"end.*(?:session|focus|timer)|stop.*(?:session|focus|timer)", "end_session"),
         (r"(?:skip|next)", "skip_session"),
@@ -117,6 +117,9 @@ class DeskBuddyAgent:
         self.history = history
         self.session = session
         self.desk_callback = desk_callback
+
+        # Pending desk action set by intent handlers, consumed by main loop
+        self._pending_desk_action: Optional[str] = None
 
         # Compile intent patterns
         self._compiled_patterns = [
@@ -390,15 +393,22 @@ class DeskBuddyAgent:
     def _intent_desk_stand(self, params: Dict, query: str) -> str:
         """Stand desk up."""
         if self.desk_callback:
-            # This would be called async
+            self._pending_desk_action = "stand"
             return "Moving desk to standing position."
         return "Desk control isn't connected right now."
 
     def _intent_desk_sit(self, params: Dict, query: str) -> str:
         """Lower desk."""
         if self.desk_callback:
+            self._pending_desk_action = "sit"
             return "Moving desk to sitting position."
         return "Desk control isn't connected right now."
+
+    def get_pending_desk_action(self) -> Optional[str]:
+        """Return and clear any pending desk action."""
+        action = self._pending_desk_action
+        self._pending_desk_action = None
+        return action
 
     def _intent_greeting(self, params: Dict, query: str) -> str:
         """Respond to greeting."""

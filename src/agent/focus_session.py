@@ -81,14 +81,16 @@ class FocusSessionManager:
     # Posture warning threshold
     POSTURE_WARNING_THRESHOLD = 0.3    # Warn if < 30% good posture
 
-    def __init__(self, history: Optional['StateHistory'] = None):
+    def __init__(self, history: Optional['StateHistory'] = None, demo_mode: bool = False):
         """
         Initialize focus session manager.
 
         Args:
             history: StateHistory for querying focus/posture state
+            demo_mode: Use shortened thresholds for demo/presentation
         """
         self.history = history
+        self.demo_mode = demo_mode
 
         self.phase = SessionPhase.IDLE
         self.start_time: Optional[float] = None
@@ -98,9 +100,14 @@ class FocusSessionManager:
         # Tracking
         self._sessions_completed: int = 0
         self._last_suggestion_time: float = 0.0
-        self._suggestion_cooldown: float = 60.0  # Min seconds between suggestions
+        self._suggestion_cooldown: float = 5.0 if demo_mode else 60.0
         self._posture_warned: bool = False
         self._distraction_events: List[float] = []
+
+        # Override thresholds in demo mode
+        if demo_mode:
+            self.EARLY_BREAK_MIN_ELAPSED_MIN = 0.25   # 15 seconds
+            self.EARLY_BREAK_CHECK_WINDOW_MIN = 0.25   # 15 seconds
 
     def start_focus(self, duration_min: int = DEFAULT_FOCUS_DURATION_MIN) -> str:
         """

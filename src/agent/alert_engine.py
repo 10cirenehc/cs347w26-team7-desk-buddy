@@ -86,6 +86,7 @@ class AlertEngine:
         desk_client: Optional['DeskClient'] = None,
         tts: Optional['TextToSpeech'] = None,
         enabled: bool = True,
+        demo_mode: bool = False,
     ):
         """
         Initialize alert engine.
@@ -94,10 +95,12 @@ class AlertEngine:
             desk_client: DeskClient for desk movements
             tts: TextToSpeech for voice alerts
             enabled: Whether alerts are enabled
+            demo_mode: Use shortened thresholds for demo/presentation
         """
         self.desk = desk_client
         self.tts = tts
         self.enabled = enabled
+        self.demo_mode = demo_mode
 
         self._rules: List[AlertRule] = []
         self._last_triggered: Dict[str, float] = {}
@@ -110,19 +113,17 @@ class AlertEngine:
     def _build_default_rules(self) -> None:
         """Build the default set of alert rules."""
         self._rules = []
+        demo = self.demo_mode
 
         # ----- Focus Session Rules (gentler during focus) -----
 
         # Posture degrading during focus - silent nudge first
         self._rules.append(AlertRule(
             name="focus_posture_degrading",
-            condition=lambda h: (
-                h.state_ratio("posture", "bad", 300) > 0.6 and  # >60% bad in last 5 min
-                h.duration_in_state("posture", "bad") > 180     # Currently bad for 3+ min
-            ),
+            condition=lambda h: h.state_ratio("posture", "bad", 30 if demo else 300) > 0.6,
             action=AlertAction.DESK_NUDGE,
             message_template="",  # Silent nudge during focus
-            cooldown_seconds=600,  # 10 minutes
+            cooldown_seconds=20 if demo else 600,
             priority=AlertPriority.MEDIUM,
             requires_focus_session=True,
         ))
@@ -130,10 +131,10 @@ class AlertEngine:
         # Severe slouch during focus - stand up
         self._rules.append(AlertRule(
             name="focus_severe_slouch",
-            condition=lambda h: h.duration_in_state("posture", "bad") > 900,  # 15 min continuous
+            condition=lambda h: h.state_ratio("posture", "bad", 60 if demo else 900) > 0.75,
             action=AlertAction.VOICE_AND_DESK,
             message_template="Your posture needs attention. Standing for a moment.",
-            cooldown_seconds=1800,  # 30 minutes
+            cooldown_seconds=30 if demo else 1800,
             priority=AlertPriority.HIGH,
             requires_focus_session=True,
         ))
@@ -143,34 +144,34 @@ class AlertEngine:
         # Bad posture outside focus - more proactive
         self._rules.append(AlertRule(
             name="idle_bad_posture",
-            condition=lambda h: h.duration_in_state("posture", "bad") > 600,  # 10 min
+            condition=lambda h: h.state_ratio("posture", "bad", 40 if demo else 600) > 0.7,
             action=AlertAction.VOICE_AND_DESK,
             message_template="Time to stand! You've been slouching for a while.",
-            cooldown_seconds=1800,  # 30 minutes
+            cooldown_seconds=30 if demo else 1800,
             priority=AlertPriority.MEDIUM,
             requires_focus_session=False,
         ))
 
-        # Sitting too long
+        # Sitting too long (presence is stable, keep duration_in_state)
         self._rules.append(AlertRule(
             name="sitting_too_long",
-            condition=lambda h: h.duration_in_state("presence", "seated") > 3600,  # 1 hour
+            condition=lambda h: h.duration_in_state("presence", "seated") > (60 if demo else 3600),
             action=AlertAction.VOICE,
             message_template="You've been sitting for an hour. Consider standing for a few minutes.",
-            cooldown_seconds=3600,  # 1 hour
+            cooldown_seconds=30 if demo else 3600,
             priority=AlertPriority.LOW,
             requires_focus_session=False,
         ))
 
         # ----- Always Active Rules -----
 
-        # Standing too long
+        # Standing too long (presence is stable, keep duration_in_state)
         self._rules.append(AlertRule(
             name="standing_too_long",
-            condition=lambda h: h.duration_in_state("presence", "standing") > 2700,  # 45 min
+            condition=lambda h: h.duration_in_state("presence", "standing") > (50 if demo else 2700),
             action=AlertAction.VOICE,
             message_template="You've been standing for 45 minutes. Take a seat if you need a rest.",
-            cooldown_seconds=2700,  # 45 minutes
+            cooldown_seconds=30 if demo else 2700,
             priority=AlertPriority.LOW,
             requires_focus_session=None,  # Always active
         ))
@@ -178,13 +179,10 @@ class AlertEngine:
         # Good posture streak - positive reinforcement
         self._rules.append(AlertRule(
             name="good_posture_streak",
-            condition=lambda h: (
-                h.duration_in_state("posture", "good") > 1800 and  # 30 min continuous
-                h.state_ratio("posture", "good", 1800) > 0.9       # >90% good
-            ),
+            condition=lambda h: h.state_ratio("posture", "good", 40 if demo else 1800) > 0.9,
             action=AlertAction.VOICE,
             message_template="Great job! 30 minutes of excellent posture.",
-            cooldown_seconds=3600,  # 1 hour
+            cooldown_seconds=30 if demo else 3600,
             priority=AlertPriority.LOW,
             requires_focus_session=None,
         ))
@@ -195,11 +193,11 @@ class AlertEngine:
             condition=lambda h: (
                 h.get_current() is not None and
                 h.get_current().phone_detected and
-                h.duration_in_state("focus", "distracted") > 120  # 2 min with phone
+                h.state_ratio("focus", "distracted", 20 if demo else 120) > 0.7
             ),
             action=AlertAction.VOICE,
             message_template="I notice you're on your phone. Ready to get back to work?",
-            cooldown_seconds=900,  # 15 minutes
+            cooldown_seconds=20 if demo else 900,
             priority=AlertPriority.MEDIUM,
             requires_focus_session=True,  # Only during focus sessions
         ))

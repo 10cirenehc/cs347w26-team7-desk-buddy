@@ -5,11 +5,12 @@ Provides a high-level interface for controlling UPLIFT/Jiecang standing desks
 via Bluetooth Low Energy. Supports:
 - Moving to presets (sit/stand)
 - Nudge movements (brief up/down as gentle reminder)
-- Height queries
-- Connection management
+- Persistent height monitoring (updates on button press or BLE command)
+- Connection management with auto-reconnect
 
 The actual BLE communication is handled by the sitstand repo's desk_control.py.
-This module provides an async wrapper and higher-level commands.
+This module maintains a persistent BLE connection and subscribes to height
+notifications so that physical button presses update the tracked height.
 """
 
 import asyncio
@@ -53,8 +54,8 @@ class DeskClient:
     """
     Async BLE desk control client.
 
-    Wraps the sitstand desk_control.py for async operation and provides
-    high-level commands for the alert engine.
+    Maintains a persistent BLE connection with height notification subscription.
+    Physical button presses and BLE commands both trigger height updates.
 
     Usage:
         desk = DeskClient()
@@ -74,6 +75,10 @@ class DeskClient:
     SIT_THRESHOLD_CM = 75.0
     # Standing height threshold in cm (above this = standing)
     STAND_THRESHOLD_CM = 100.0
+
+    # BLE height parsing constants (from sitstand/desk_server.py)
+    HEIGHT_SCALE_FACTOR = 100.7874
+    HEIGHT_BASE_OFFSET_MM = 650.09
 
     def __init__(
         self,
@@ -100,8 +105,9 @@ class DeskClient:
         self._last_command_time: Optional[float] = None
         self._error_message: Optional[str] = None
 
-        # BLE client (lazily initialized)
+        # Persistent BLE connection for height monitoring and commands
         self._ble_client = None
+        self._ble_config = None
         self._desk_control = None
         self._connected = False
 
@@ -114,6 +120,9 @@ class DeskClient:
     async def connect(self) -> bool:
         """
         Connect to the desk via BLE.
+
+        Establishes a persistent BLE connection, subscribes to height
+        notifications, and performs an initial height query.
 
         Returns:
             True if connected successfully
@@ -141,9 +150,12 @@ class DeskClient:
                 await self._notify_state_change()
                 return True
 
-            # Attempt BLE connection
-            # The actual connection is handled by desk_control's functions
-            # which connect on-demand
+            # Establish persistent BLE connection with height monitoring
+            try:
+                await self._start_height_monitor()
+            except Exception as e:
+                logger.warning(f"Persistent BLE connection failed, commands will use on-demand connections: {e}")
+
             self._connected = True
             self._state = DeskState.CONNECTED
             await self._notify_state_change()
@@ -159,6 +171,16 @@ class DeskClient:
 
     async def disconnect(self) -> None:
         """Disconnect from the desk."""
+        # Close persistent BLE connection
+        if self._ble_client is not None:
+            try:
+                if self._ble_client.is_connected:
+                    await self._ble_client.disconnect()
+            except Exception as e:
+                logger.debug(f"Error disconnecting BLE client: {e}")
+            self._ble_client = None
+            self._ble_config = None
+
         self._connected = False
         self._state = DeskState.DISCONNECTED
         await self._notify_state_change()
@@ -193,6 +215,136 @@ class DeskClient:
 
         return None
 
+    # ----- Persistent BLE height monitor -----
+
+    async def _start_height_monitor(self) -> None:
+        """
+        Establish persistent BLE connection and subscribe to height notifications.
+
+        The desk sends height notifications whenever it moves — whether from
+        BLE commands or physical button presses. By keeping a connection open
+        and subscribed, we get real-time height updates from any source.
+
+        Also performs an initial height query by sending a brief 'up' then 'stop'.
+        """
+        try:
+            from bleak import BleakClient
+        except ImportError:
+            logger.warning("bleak not installed, cannot establish persistent connection")
+            return
+
+        addr = await self._desk_control.get_desk_address()
+        if not addr:
+            logger.warning("Could not find desk address for height monitor")
+            return
+
+        self._ble_client = BleakClient(
+            addr,
+            timeout=20.0,
+            disconnected_callback=self._on_ble_disconnect,
+        )
+        await self._ble_client.connect()
+
+        if not self._ble_client.is_connected:
+            logger.warning("BLE connection failed")
+            self._ble_client = None
+            return
+
+        # Detect desk config
+        self._ble_config = self._desk_control.get_cached_config()
+        if not self._ble_config:
+            self._ble_config = await self._desk_control.detect_desk_config(self._ble_client)
+        if not self._ble_config:
+            from bleak.uuids import normalize_uuid_16
+            self._ble_config = self._desk_control.DESK_CONFIGS[normalize_uuid_16(0xFF00)]
+
+        # Subscribe to height notifications
+        await self._ble_client.start_notify(
+            self._ble_config.output_char_uuid,
+            self._handle_height_notification,
+        )
+        logger.info("Subscribed to desk height notifications")
+
+        # Initial height query: brief 'up' to trigger a notification, then 'stop'
+        try:
+            await self._desk_control.send_command(self._ble_client, self._ble_config, "up")
+            await asyncio.sleep(0.3)
+            await self._desk_control.send_command(self._ble_client, self._ble_config, "stop")
+        except Exception as e:
+            logger.debug(f"Initial height query failed (non-fatal): {e}")
+
+    def _handle_height_notification(self, sender, data) -> None:
+        """
+        Handle BLE height notification from the desk.
+
+        Protocol: f2 f2 01 03 SS HH HH checksum 7e
+        """
+        if len(data) >= 8 and data[0] == 0xF2 and data[1] == 0xF2:
+            if data[2] == 0x01:  # Height notification
+                raw_value = int.from_bytes(data[5:7], byteorder='big')
+                height_mm = (raw_value / self.HEIGHT_SCALE_FACTOR) + self.HEIGHT_BASE_OFFSET_MM
+                self._height_cm = height_mm / 10.0
+                self._update_position_from_height()
+
+    def _on_ble_disconnect(self, client) -> None:
+        """Handle unexpected BLE disconnection."""
+        logger.warning("BLE desk connection lost")
+        self._ble_client = None
+        self._ble_config = None
+
+        if self.auto_reconnect and self._connected:
+            logger.info("Will attempt BLE reconnect on next command")
+
+    async def _ensure_ble_connection(self) -> bool:
+        """
+        Ensure persistent BLE connection is active, reconnecting if needed.
+
+        Returns:
+            True if connection is available.
+        """
+        if self._ble_client is not None and self._ble_client.is_connected:
+            return True
+
+        if not self.auto_reconnect or self._desk_control is None:
+            return False
+
+        logger.info("Reconnecting persistent BLE connection...")
+        try:
+            await self._start_height_monitor()
+            return self._ble_client is not None and self._ble_client.is_connected
+        except Exception as e:
+            logger.warning(f"BLE reconnect failed: {e}")
+            return False
+
+    async def _send_command_direct(self, command: str) -> bool:
+        """
+        Send command through the persistent BLE connection.
+
+        Returns:
+            True if command sent successfully.
+        """
+        if not await self._ensure_ble_connection():
+            return False
+
+        return await self._desk_control.send_command(
+            self._ble_client, self._ble_config, command
+        )
+
+    # ----- Position helpers -----
+
+    def _update_position_from_height(self) -> None:
+        """Derive position (sit/stand/unknown) from current height."""
+        if self._height_cm is None:
+            return
+        if self._height_cm < self.SIT_THRESHOLD_CM:
+            self._position = DeskPosition.SIT
+        elif self._height_cm > self.STAND_THRESHOLD_CM:
+            self._position = DeskPosition.STAND
+        else:
+            self._position = DeskPosition.UNKNOWN
+
+    # ----- Public commands -----
+
     async def sit(self) -> bool:
         """
         Move desk to sitting position.
@@ -212,49 +364,90 @@ class DeskClient:
         return await self._move_to_preset("stand")
 
     async def _move_to_preset(self, preset: str) -> bool:
-        """Move desk to a preset position."""
+        """
+        Move desk to a preset position (non-blocking).
+
+        Launches a background task that sends directional commands ("up"/"down")
+        every 200ms while monitoring height via BLE notifications. Stops once
+        the target height is reached or timeout expires.
+        """
         if not self.enabled:
             logger.info(f"Desk control disabled, skipping {preset}")
             self._position = DeskPosition.SIT if preset == "sit" else DeskPosition.STAND
             return True
 
-        async with self._move_lock:
-            self._last_command = preset
-            self._last_command_time = time.time()
-            self._state = DeskState.MOVING
+        self._last_command = preset
+        self._last_command_time = time.time()
+        self._state = DeskState.MOVING
+        await self._notify_state_change()
+
+        if await self._ensure_ble_connection():
+            asyncio.create_task(self._move_until_height(preset))
+            return True
+        elif self._desk_control is not None:
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None, self._desk_control.main, preset
+            )
+            self._state = DeskState.CONNECTED
             await self._notify_state_change()
+            return result == 0
+        else:
+            # Simulation mode
+            self._position = DeskPosition.SIT if preset == "sit" else DeskPosition.STAND
+            self._state = DeskState.CONNECTED
+            await self._notify_state_change()
+            return True
 
-            try:
-                if self._desk_control is not None:
-                    # Run the blocking BLE command in executor
-                    loop = asyncio.get_event_loop()
-                    result = await loop.run_in_executor(
-                        None,
-                        self._desk_control.move_to_preset,
-                        preset
-                    )
-                    success = result == 0
-                else:
-                    # Simulation mode
-                    await asyncio.sleep(2.0)  # Simulate movement time
-                    success = True
+    async def _move_until_height(self, preset: str, timeout_seconds: float = 15.0) -> None:
+        """
+        Background task: wake the desk once, then send directional keep-alive
+        packets (up/down) every 200ms while monitoring height. The Jiecang
+        protocol stops the motor if it doesn't receive a command within ~1s,
+        so periodic resends are required. Raw GATT writes bypass the heavy
+        wake-per-call overhead in send_command.
+        """
+        dc = self._desk_control
+        config = self._ble_config
+        client = self._ble_client
+        input_uuid = config.input_char_uuid
 
-                if success:
-                    self._position = DeskPosition.SIT if preset == "sit" else DeskPosition.STAND
-                    logger.info(f"Desk moved to {preset} position")
-                else:
-                    logger.warning(f"Failed to move desk to {preset}")
+        direction = "up" if preset == "stand" else "down"
+        target_cm = self.STAND_THRESHOLD_CM if preset == "stand" else self.SIT_THRESHOLD_CM
+        direction_packet = dc.COMMANDS[direction]
+        stop_packet = dc.COMMANDS["stop"]
 
-                self._state = DeskState.CONNECTED
-                await self._notify_state_change()
-                return success
+        try:
+            async with self._move_lock:
+                # Wake once
+                await dc.send_wake_sequence(client, input_uuid)
 
-            except Exception as e:
-                self._error_message = str(e)
-                self._state = DeskState.ERROR
-                await self._notify_state_change()
-                logger.error(f"Error moving desk: {e}")
-                return False
+                end_time = time.time() + timeout_seconds
+                while time.time() < end_time:
+                    if self._height_cm is not None:
+                        if preset == "stand" and self._height_cm >= target_cm:
+                            logger.info(f"Reached standing height: {self._height_cm:.1f}cm")
+                            break
+                        if preset == "sit" and self._height_cm <= target_cm:
+                            logger.info(f"Reached sitting height: {self._height_cm:.1f}cm")
+                            break
+
+                    # Keep-alive: resend direction packet directly
+                    await client.write_gatt_char(input_uuid, direction_packet, response=False)
+                    await asyncio.sleep(0.2)
+
+                await client.write_gatt_char(input_uuid, stop_packet, response=False)
+
+            self._position = DeskPosition.SIT if preset == "sit" else DeskPosition.STAND
+            self._state = DeskState.CONNECTED
+            await self._notify_state_change()
+            logger.info(f"Desk moved to {preset} position")
+
+        except Exception as e:
+            self._error_message = str(e)
+            self._state = DeskState.ERROR
+            await self._notify_state_change()
+            logger.error(f"Error moving desk to {preset}: {e}")
 
     async def nudge_up(self, duration_ms: int = 500) -> bool:
         """
@@ -293,24 +486,20 @@ class DeskClient:
             await self._notify_state_change()
 
             try:
-                if self._desk_control is not None:
-                    loop = asyncio.get_event_loop()
-
-                    # Start movement
-                    await loop.run_in_executor(
-                        None,
-                        self._desk_control.move_to_preset,
-                        direction
-                    )
-
-                    # Wait for duration
+                if await self._ensure_ble_connection():
+                    # Persistent connection path
+                    await self._send_command_direct(direction)
                     await asyncio.sleep(duration_ms / 1000.0)
-
-                    # Stop movement
+                    await self._send_command_direct("stop")
+                elif self._desk_control is not None:
+                    # Fallback: on-demand connections
+                    loop = asyncio.get_event_loop()
                     await loop.run_in_executor(
-                        None,
-                        self._desk_control.move_to_preset,
-                        "stop"
+                        None, self._desk_control.main, direction
+                    )
+                    await asyncio.sleep(duration_ms / 1000.0)
+                    await loop.run_in_executor(
+                        None, self._desk_control.main, "stop"
                     )
                 else:
                     # Simulation mode
@@ -334,12 +523,13 @@ class DeskClient:
             return True
 
         try:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None,
-                self._desk_control.move_to_preset,
-                "stop"
-            )
+            if await self._ensure_ble_connection():
+                await self._send_command_direct("stop")
+            else:
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(
+                    None, self._desk_control.main, "stop"
+                )
             self._state = DeskState.CONNECTED
             await self._notify_state_change()
             return True
@@ -354,8 +544,6 @@ class DeskClient:
         Returns:
             Height in cm, or None if not available
         """
-        # Height reading requires desk_control support
-        # For now, return cached value or estimate from position
         if self._height_cm is not None:
             return self._height_cm
 
