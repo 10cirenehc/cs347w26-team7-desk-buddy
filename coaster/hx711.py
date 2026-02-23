@@ -15,13 +15,13 @@ class HX711:
 
             GPIO.setup(self.__pd_sck, GPIO.OUT)
             GPIO.output(self.__pd_sck, False)
-            GPIO.setup(self.__dout, GPIO.IN)
+            GPIO.setup(self.__dout, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
             self.set_gain(gain)
       
       def is_ready(self):
             # When DOUT goes low, data is ready for retrieval
-            return (GPIO.input(self.__dout) == 0)
+            return (not GPIO.input(self.__dout))
       
       def set_gain(self, gain):
             if (gain == 128): # Channel A, gain factor 128
