@@ -1,4 +1,5 @@
 # Katie's UI/UX edits
+# Mainly for water tracking
 import digitalio
 import board
 import busio
