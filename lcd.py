@@ -120,15 +120,17 @@ def touch_in(tx, ty, x0, y0, x1, y1):
 def get_touch():
     """Return (x, y) of first touch in display coords, or None."""
     if ft.touched:
-        t = ft.touches[0]
-        # FocalTouch reports in sensor coords; ILI9341 rotated 90° landscape:
-        # raw x → display y,  raw y → display x
-        raw_x = t["x"]
-        raw_y = t["y"]
-        # sensor is 240×320, display is 320×240 after rotation
-        disp_x = raw_y
-        disp_y = raw_x
-        return disp_x, disp_y
+        touches = ft.touches
+        if touches and len(touches) > 0:
+            t = touches[0]
+            # FocalTouch reports in sensor coords; ILI9341 rotated 90° landscape:
+            # raw x → display y,  raw y → display x
+            raw_x = t["x"]
+            raw_y = t["y"]
+            # sensor is 240×320, display is 320×240 after rotation
+            disp_x = raw_y
+            disp_y = raw_x
+            return disp_x, disp_y
     return None
 
 # ─────────────────────────────────────────────────────────────────────────────
