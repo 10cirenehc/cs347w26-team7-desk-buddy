@@ -18,14 +18,14 @@ class HX711:
             GPIO.setup(self.__dout, GPIO.IN)
 
             self.set_gain(gain)
-            self.reset() # Ensures known state
+            self.reset()
       
       def reset(self):
-        # Power down (SCK high >60us) then power back up
+        # Power down then power back up
         GPIO.output(self.__pd_sck, True)
-        time.sleep(0.0001)  # 100us — forces power down
+        time.sleep(0.0001)
         GPIO.output(self.__pd_sck, False)
-        time.sleep(0.4)     # wait for HX711 to reset and start up (~400ms)
+        time.sleep(0.4)
 
       def is_ready(self):
             # When DOUT goes low, data is ready for retrieval

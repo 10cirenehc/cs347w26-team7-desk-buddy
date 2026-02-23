@@ -1,8 +1,8 @@
 class Cup:
-      def __init__(self, name, cup_w, full_cup_w):
+      def __init__(self, name, cup_weight, full_cup_weight):
             self.name = name
-            self.__weight = cup_w
-            self.__full_water = full_cup_w - cup_w
+            self.__weight = cup_weight
+            self.__full_water = full_cup_weight - cup_w
       
       def get_cup_weight(self):
             return self.__weight
