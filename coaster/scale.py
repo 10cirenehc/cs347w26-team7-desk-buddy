@@ -3,6 +3,7 @@ import time
 from hx711 import HX711
 
 GPIO.setmode(GPIO.BOARD)
+GPIO.setwarnings(False)
 
 DT_PIN = 29
 SCK_PIN = 31

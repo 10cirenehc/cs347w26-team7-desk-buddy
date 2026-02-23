@@ -14,6 +14,7 @@ class HX711:
             self.__gpulse = 0
 
             GPIO.setup(self.__pd_sck, GPIO.OUT)
+            GPIO.output(self.__pd_sck, False)
             GPIO.setup(self.__dout, GPIO.IN)
 
             self.set_gain(gain)
@@ -43,10 +44,12 @@ class HX711:
             # to shift out data from DOUT (24 bits total)
             for _ in range(24):
                   GPIO.output(self.__pd_sck, True)
+                  time.sleep(0.0001)
+                  bit = GPIO.input(self.__dout)
                   # MSB bit shifted out first
-                  value = (value << 1) | GPIO.input(self.__dout)
-                  print(value)
                   GPIO.output(self.__pd_sck, False)
+                  time.sleep(0.0001)
+                  value = (value << 1) | bit
             
             # 25th pulse pulls DOUT back to high
             # Additional pulses control input and gain            
