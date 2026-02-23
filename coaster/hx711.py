@@ -15,10 +15,18 @@ class HX711:
 
             GPIO.setup(self.__pd_sck, GPIO.OUT)
             GPIO.output(self.__pd_sck, False)
-            GPIO.setup(self.__dout, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+            GPIO.setup(self.__dout, GPIO.IN)
 
             self.set_gain(gain)
+            self.reset() # Ensures known state
       
+      def reset(self):
+        # Power down (SCK high >60us) then power back up
+        GPIO.output(self.__pd_sck, True)
+        time.sleep(0.0001)  # 100us — forces power down
+        GPIO.output(self.__pd_sck, False)
+        time.sleep(0.4)     # wait for HX711 to reset and start up (~400ms)
+
       def is_ready(self):
             # When DOUT goes low, data is ready for retrieval
             return (not GPIO.input(self.__dout))
@@ -44,11 +52,9 @@ class HX711:
             # to shift out data from DOUT (24 bits total)
             for _ in range(24):
                   GPIO.output(self.__pd_sck, True)
-                  time.sleep(0.0001)
                   bit = GPIO.input(self.__dout)
                   # MSB bit shifted out first
                   GPIO.output(self.__pd_sck, False)
-                  time.sleep(0.0001)
                   value = (value << 1) | bit
             
             # 25th pulse pulls DOUT back to high
@@ -57,9 +63,7 @@ class HX711:
             # Set gain accordingly for next read:
             for _ in range(self.__gpulse):
                   GPIO.output(self.__pd_sck, True)
-                  time.sleep(0.01) # these delays may not be necessary...
                   GPIO.output(self.__pd_sck, False)
-                  time.sleep(0.01)
             # And re-enable them here!
             
             # Signed 24-bit
