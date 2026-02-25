@@ -1,0 +1,13 @@
+# Voice I/O dependencies
+# On macOS, first run: pip install pyobjc-core
+
+pyaudio>=0.2.13
+faster-whisper>=0.10.0
+piper-tts>=1.2.0
+openwakeword>=0.6.0
+
+# LLM (local inference)
+llama-cpp-python>=0.2.0
+
+# Desk control (BLE)
+bleak>=0.21.0

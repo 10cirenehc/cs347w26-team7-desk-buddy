@@ -1,0 +1,88 @@
+# Desk Buddy Perception Pipeline Configuration
+# Unified config for all pipeline modules
+
+video_source:
+  device_id: 0
+  width: 640
+  height: 480
+  fps: 30
+  drop_policy: "latest"  # "latest" drains stale frames; "normal" uses default read()
+
+person_detector:
+  model: "models/yolov8s.pt"
+  confidence: 0.25  # Lowered for side-angle detection
+  device: "cpu"  # "cuda:0" on Jetson
+  classes: [0, 67]  # person + cell phone
+
+tracker:
+  iou_threshold: 0.2  # Lower threshold for better tracking at angles
+  max_lost_frames: 10  # Re-select primary faster when lost
+  primary_strategy: "largest"  # select largest bbox as primary user
+  size_switch_threshold: 1.8  # Only switch primary if someone else is 1.8x larger (prevents distant people from stealing focus)
+
+pose_estimator:
+  model_complexity: 1  # 0=lite, 1=full
+  min_detection_confidence: 0.3  # Lowered for side-angle detection
+  padding_ratio: 0.3  # padding around primary bbox for pose estimation
+
+calibration:
+  duration_seconds: 10
+  save_path: "data/calibration_profile.json"
+
+posture_classifier:
+  type: "logistic"  # "logistic" or "mlp"
+  model_path: "data/trained_models/posture_model.pkl"
+  threshold_fallback: 4.0  # L2 norm threshold when no trained model (increased for small-std calibrations)
+
+posture_cnn:
+  model_path: "data/trained_models/posture_cnn.pt"
+
+posture_state:
+  ewma_alpha: 0.3
+  t_on: 0.65   # good -> bad transition threshold
+  t_off: 0.45  # bad -> good transition threshold
+  unknown_visibility: 0.3  # Lowered for side-angle detection
+
+pipeline:
+  detect_every_n: 3  # run YOLO every Nth frame; pose runs every frame (lowered for better angle tracking)
+
+# State logging configuration
+state_logger:
+  enabled: true
+  log_interval_seconds: 1.0
+  output_dir: "data/state_logs"
+  max_memory_snapshots: 3600  # 1 hour at 1 Hz
+
+# Voice I/O configuration
+voice:
+  wake_word:
+    phrase: "hey_mycroft"  # Available: hey_jarvis, alexa, hey_mycroft, ok_google
+    sensitivity: 0.5
+  stt:
+    model: "small"  # tiny, base, small, medium, large-v2
+    language: "en"
+  tts:
+    voice: "en_US-lessac-medium"
+    speed: 1.0
+
+# LLM Agent configuration
+agent:
+  model: "llama-3.1-8b"
+  max_tokens: 150
+  temperature: 0.7
+
+# Adaptive alerts configuration
+alerts:
+  enabled: true
+  bad_posture_threshold_seconds: 600
+  distraction_threshold_seconds: 300
+  positive_reinforcement: true
+
+# Desk control configuration
+desk:
+  enabled: true
+  sitstand_path: "../sitstand"
+  auto_stand_on_bad_posture: true
+  nudge_on_prolonged_sitting: true
+  sitting_limit_minutes: 60
+  standing_limit_minutes: 45
