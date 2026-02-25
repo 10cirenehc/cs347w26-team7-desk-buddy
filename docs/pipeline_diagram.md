@@ -1,171 +1,78 @@
 ```mermaid
 flowchart TB
-    %% ──────────────── PERCEPTION PIPELINE ────────────────
-    subgraph PERCEPTION["Perception Pipeline (~30 fps)"]
+    %% ──────────────── PERCEPTION ────────────────
+    subgraph PERCEPTION["Perception Pipeline"]
         direction TB
+        CAM["Webcam<br/>640x480 BGR"]
+        DET["YOLOv8s<br/>Person + Phone Detection"]
+        TRK["ByteTrack<br/>Primary Person Tracking"]
+        POSE["MediaPipe Pose<br/>33 Landmarks"]
+        SKEL["render_skeleton()<br/>224x224 Image"]
+        CNN["PostureCNN<br/>p_bad"]
+        PSM["PostureStateMachine<br/>EWMA + Hysteresis"]
+        FOCUS["FocusEstimator<br/>Posture + Gaze + Phone"]
 
-        CAM["VideoSource<br/>(Webcam 640x480)"]
-        DET["PersonDetector<br/>(YOLOv8s)"]
-        TRK["PrimaryTracker<br/>(ByteTrack)"]
-        POSE["PoseEstimator<br/>(MediaPipe 33-lm)"]
-        FEAT["extract_features()"]
-        PHONE_CHK{{"Phone-Person<br/>Overlap Check"}}
-
-        subgraph POSTURE_PATH["Posture Classification"]
-            direction TB
-            CNN_CHK{"CNN model<br/>available?"}
-            subgraph CNN_PATH["CNN Path"]
-                SKEL["render_skeleton()<br/>(224x224 image)"]
-                CNN["PostureCNN<br/>(predict_proba)"]
-            end
-            subgraph LR_PATH["LogReg Path"]
-                CAL["CalibrationManager<br/>.normalize()"]
-                CLF["PostureClassifier<br/>.predict()"]
-            end
-            PSM["PostureStateMachine<br/>(EWMA + hysteresis)"]
-        end
-
-        PRES["PresenceDetector<br/>.detect()"]
-        FOCUS["FocusEstimator<br/>.estimate()"]
-
-        %% Perception edges
-        CAM -- "BGR frame<br/>(480,640,3)" --> DET
-        DET -- "List[BBox]<br/>(persons)" --> TRK
-        DET -. "List[BBox]<br/>(phones)" .-> PHONE_CHK
-        TRK -- "TrackedPerson<br/>(.bbox)" --> POSE
-        CAM -- "BGR frame" --> POSE
-        POSE -- "PoseKeypoints<br/>(33,4)" --> FEAT
-        POSE -- "PoseKeypoints" --> PRES
-        FEAT -- "PostureFeatures<br/>(7D vector)" --> CNN_CHK
-
-        CNN_CHK -- "Yes" --> SKEL
-        SKEL -- "Tensor" --> CNN
-        CNN -- "p_bad" --> PSM
-        CNN_CHK -- "No" --> CAL
-        CAL -- "np.ndarray(7,)<br/>(z-scores)" --> CLF
-        CLF -- "PostureClassification<br/>(.p_bad)" --> PSM
-        FEAT -. "avg_visibility" .-> PSM
-
-        TRK -. "primary_bbox" .-> PHONE_CHK
-
-        PSM -- "SmoothedPostureState" --> FOCUS
-        PRES -- "PresenceResult" --> FOCUS
-        PHONE_CHK -- "phone_detected<br/>bool" --> FOCUS
+        CAM --> DET --> TRK --> POSE
+        CAM --> POSE
+        POSE --> SKEL --> CNN --> PSM --> FOCUS
+        DET -. "phone bbox" .-> FOCUS
+        POSE -. "gaze + presence" .-> FOCUS
     end
 
-    %% ──────────────── STATE LOGGING ────────────────
-    subgraph STATE["State Logging & History"]
+    %% ──────────────── STATE ────────────────
+    subgraph STATE["State Log"]
         direction LR
-        SLOG["StateLogger<br/>.log() @ 1 Hz"]
-        RING["Ring Buffer<br/>(max 3600 snapshots)"]
-        EVENTS["Event Log<br/>(state transitions)"]
-        HIST["StateHistory<br/>(query API)"]
-        JSONL[("JSONL File<br/>data/state_logs/")]
+        SLOG["StateLogger<br/>@ 1 Hz"]
+        HIST["StateHistory<br/>Ring Buffer + Query API"]
+        JSONL[("JSONL<br/>data/state_logs/")]
 
-        SLOG --> RING
-        SLOG --> EVENTS
+        SLOG --> HIST
         SLOG -.-> JSONL
-        RING --> HIST
-        EVENTS --> HIST
     end
 
-    %% Connect perception → state
-    PSM -- "posture" --> SLOG
-    FOCUS -- "FocusEstimation" --> SLOG
-    PRES -- "presence" --> SLOG
-    PHONE_CHK -- "phone" --> SLOG
-    FEAT -. "features" .-> SLOG
+    FOCUS -- "StateSnapshot" --> SLOG
 
-    %% ──────────────── VOICE I/O ────────────────
+    %% ──────────────── VOICE ────────────────
     subgraph VOICE["Voice I/O"]
-        direction TB
-        MIC["AudioManager<br/>(16kHz mono, PyAudio)"]
-        WW["WakeWordDetector<br/>(OpenWakeWord)"]
-        STT["SpeechToText<br/>(faster-whisper)"]
-        TTS["TextToSpeech<br/>(Piper / macOS say)"]
+        direction LR
+        MIC["Microphone<br/>16 kHz mono"]
+        WW["OpenWakeWord<br/>Hey Jarvis"]
+        STT["faster-whisper<br/>Speech to Text"]
+        TTS["Piper TTS<br/>Text to Speech"]
 
-        MIC -- "int16 chunks<br/>(1280 samples)" --> WW
-        WW -- "wake detected<br/>(bool)" --> STT
-        MIC -- "audio stream" --> STT
+        MIC --> WW -- "wake" --> STT
     end
 
     %% ──────────────── AGENT ────────────────
-    subgraph AGENT["Agent"]
-        direction TB
-        CORE["DeskBuddyAgent<br/>.process_query()"]
-        INTENT["Intent Matching<br/>(20 regex patterns)"]
-        LLM["LLMClient<br/>(Llama 3.1 8B / sim)"]
+    AGENT["Agent<br/>Regex Intent Matching"]
 
-        CORE --> INTENT
-        INTENT -- "no match" --> LLM
-    end
+    STT -- "transcript" --> AGENT
+    HIST -- "context" --> AGENT
+    AGENT -- "response" --> TTS
 
-    %% ──────────────── FOCUS SESSION ────────────────
-    subgraph SESSION["Focus Session"]
-        direction TB
-        FSM["FocusSessionManager<br/>.check_and_suggest()"]
-        STATS["SessionStats<br/>(focus_ratio, posture)"]
+    %% ──────────────── SESSION ────────────────
+    FSM["Focus Session<br/>Pomodoro Timer"]
+    AGENT -- "start / end" --> FSM
+    HIST -- "focus ratio" --> FSM
+    FSM -- "suggestion" --> TTS
 
-        FSM --> STATS
-    end
+    %% ──────────────── ALERTS ────────────────
+    AE["Alert Engine<br/>7 Rules + Cooldowns"]
+    HIST -- "state ratios" --> AE
+    FSM -. "session context" .-> AE
+    AE -- "voice alert" --> TTS
 
-    %% ──────────────── ALERT ENGINE ────────────────
-    subgraph ALERTS["Adaptive Alerts (every 1s)"]
-        direction TB
-        AE["AlertEngine<br/>.check_and_execute()"]
-        RULES["7 Alert Rules<br/>(ratio-based conditions)"]
-        COOL["Cooldown Manager"]
-        PRIO["Priority Selector"]
-
-        AE --> RULES
-        RULES --> COOL
-        COOL --> PRIO
-    end
-
-    %% ──────────────── DESK CONTROL ────────────────
-    subgraph DESK["Desk Control"]
-        direction TB
-        DC["DeskClient<br/>(BLE GATT)"]
-        HW[("Standing Desk<br/>(BLE)")]
-
-        DC <--> HW
-    end
-
-    %% ──────────────── CROSS-MODULE CONNECTIONS ────────────────
-
-    %% Voice → Agent flow
-    STT -- "TranscriptionResult<br/>(.text)" --> CORE
-    CORE -- "response text" --> TTS
-    CORE -. "pending desk<br/>action" .-> DC
-
-    %% History feeds agent, alerts, session
-    HIST -- "context dict" --> LLM
-    HIST -- "state_ratio()<br/>duration_in_state()" --> AE
-    HIST -- "state_ratio()" --> FSM
-
-    %% Alert engine outputs
-    PRIO -- "voice message" --> TTS
-    PRIO -- "desk command<br/>(stand/nudge)" --> DC
-
-    %% Focus session outputs
-    FSM -- "SessionSuggestion<br/>(.message)" --> TTS
-
-    %% Session context to alerts
-    FSM -. "is_active<br/>(session context)" .-> AE
-
-    %% Agent controls session
-    INTENT -- "start/end/skip" --> FSM
+    %% ──────────────── DESK ────────────────
+    DESK["Desk Client<br/>BLE GATT"]
+    HW[("Standing Desk")]
+    AE -- "stand / nudge" --> DESK
+    AGENT -. "sit / stand" .-> DESK
+    DESK <--> HW
 
     %% ──────────────── DISPLAY ────────────────
-    subgraph DISPLAY["Display"]
-        OVL["_draw_overlay()<br/>+ cv2.imshow()"]
-    end
-
-    PSM -. "posture" .-> OVL
-    FOCUS -. "focus" .-> OVL
-    PRES -. "presence" .-> OVL
-    HIST -. "durations" .-> OVL
+    OVL["CV2 Overlay<br/>Live Display"]
     CAM -. "frame" .-> OVL
+    FOCUS -. "status" .-> OVL
 
     %% Styling
     classDef perception fill:#2d6a4f,stroke:#1b4332,color:#d8f3dc
@@ -177,12 +84,12 @@ flowchart TB
     classDef desk fill:#606c38,stroke:#283618,color:#fefae0
     classDef display fill:#555,stroke:#333,color:#eee
 
-    class CAM,DET,TRK,POSE,FEAT,PHONE_CHK,CNN_CHK,SKEL,CNN,CAL,CLF,PSM,PRES,FOCUS perception
-    class SLOG,RING,EVENTS,HIST,JSONL state
+    class CAM,DET,TRK,POSE,SKEL,CNN,PSM,FOCUS perception
+    class SLOG,HIST,JSONL state
     class MIC,WW,STT,TTS voice
-    class CORE,INTENT,LLM agent
-    class FSM,STATS session
-    class AE,RULES,COOL,PRIO alerts
-    class DC,HW desk
+    class AGENT agent
+    class FSM session
+    class AE alerts
+    class DESK,HW desk
     class OVL display
 ```
