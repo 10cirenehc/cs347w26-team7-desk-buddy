@@ -129,7 +129,7 @@ def get_touch():
             raw_y = t["y"]
             # sensor is 240×320, display is 320×240 after rotation
             disp_x = raw_y
-            disp_y = raw_x
+            disp_y = HEIGHT - raw_x
             return disp_x, disp_y
     return None
 
