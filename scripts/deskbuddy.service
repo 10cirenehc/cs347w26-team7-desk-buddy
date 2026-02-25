@@ -1,0 +1,17 @@
+[Unit]
+Description=Desk Buddy Posture Assistant
+After=network.target bluetooth.target
+
+[Service]
+Type=simple
+# CHANGE: Replace <username> with your actual username on the Orin
+User=<username>
+WorkingDirectory=/home/<username>/desk-buddy/cs347w26-team7-desk-buddy
+Environment=PATH=/home/<username>/desk-buddy/venv/bin:/usr/local/cuda/bin:/usr/bin
+Environment=LD_LIBRARY_PATH=/usr/local/cuda/lib64
+ExecStart=/home/<username>/desk-buddy/venv/bin/python3 -m src.main --no-display --skip-calibration
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

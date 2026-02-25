@@ -1,0 +1,23 @@
+# Jetson AGX Orin dependencies
+# DO NOT install: opencv-python (use JetPack's), torch, torchvision (use NVIDIA wheels)
+# See docs/JETSON_DEPLOY.md for PyTorch and OpenCV setup.
+
+# Perception
+ultralytics>=8.0.0
+supervision>=0.18.0
+numpy>=1.24.0
+pyyaml>=6.0
+scikit-learn>=1.3.0
+mediapipe>=0.10.9
+
+# Voice I/O
+pyaudio>=0.2.13
+faster-whisper>=0.10.0
+piper-tts>=1.2.0
+openwakeword>=0.6.0
+
+# BLE desk control
+bleak>=0.21.0
+
+# LLM — install separately with CUDA:
+# CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python>=0.2.0 --no-cache-dir
