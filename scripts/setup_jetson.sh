@@ -230,10 +230,26 @@ main() {
     install_piper_binary
     download_piper_voice
 
+    # ── LD_PRELOAD fix for static TLS on aarch64 ──
+    # Libraries using initial-exec TLS model (e.g. libgomp from OpenMP) cause
+    # "cannot allocate memory in static TLS block" when loaded via dlopen().
+    # Preloading ensures they get a TLS slot at process start.
+    local LD_PRELOAD_LINE='export LD_PRELOAD=/usr/lib/aarch64-linux-gnu/libgomp.so.1'
+    if ! grep -qF "$LD_PRELOAD_LINE" ~/.bashrc 2>/dev/null; then
+        info "Adding LD_PRELOAD fix for static TLS to ~/.bashrc ..."
+        echo "" >> ~/.bashrc
+        echo "# Desk Buddy: fix static TLS allocation error on aarch64" >> ~/.bashrc
+        echo "$LD_PRELOAD_LINE" >> ~/.bashrc
+    else
+        info "LD_PRELOAD fix already in ~/.bashrc."
+    fi
+
     echo
     info "=== Setup complete! ==="
     info ""
     info "Next steps:"
+    info "  0. Apply LD_PRELOAD fix (already added to ~/.bashrc, reload with: source ~/.bashrc)"
+    info "     Or for this shell: export LD_PRELOAD=/usr/lib/aarch64-linux-gnu/libgomp.so.1"
     info "  1. Transfer models from dev machine (see docs/JETSON_DEPLOY.md Step 8)"
     info "  2. Copy Jetson config: cp config/pipeline.jetson.yaml config/pipeline.yaml"
     info "  3. Run verification:  python3 scripts/verify_jetson.py"

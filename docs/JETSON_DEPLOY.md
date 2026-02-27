@@ -392,4 +392,5 @@ model.export(format='engine', half=True, device=0)
 | TTS no audio on Linux | Piper voice not downloaded | Download `.onnx` + `.json` to `~/.local/share/piper/` (Step 8) |
 | `piper-tts` won't install (Python 3.8) | `piper-tts` requires Python ≥3.9 | Install Piper aarch64 binary (Step 8) or use `espeak-ng` as fallback |
 | sklearn pickle version mismatch | Different sklearn version | `pip install scikit-learn==<same version as dev machine>` |
+| `ImportError: cannot allocate memory in static TLS block` | glibc static TLS exhausted on aarch64 (libgomp/OpenMP) | `export LD_PRELOAD=/usr/lib/aarch64-linux-gnu/libgomp.so.1` before running, or add it to `~/.bashrc`. The systemd service already sets this. |
 | Low FPS | Power mode / no TensorRT | `sudo nvpmodel -m 0 && sudo jetson_clocks`, export to TensorRT (Step 13) |
