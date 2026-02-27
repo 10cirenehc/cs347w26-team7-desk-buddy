@@ -1,5 +1,5 @@
 """
-Text-to-speech with Piper TTS and macOS 'say' fallback.
+Text-to-speech with Piper TTS, espeak-ng, and macOS 'say' fallback.
 
 Provides voice output for assistant responses.
 """
@@ -28,12 +28,13 @@ class VoiceInfo:
 
 class TextToSpeech:
     """
-    Text-to-speech with Piper TTS and macOS 'say' fallback.
+    Text-to-speech with Piper TTS, espeak-ng, and macOS 'say' fallback.
 
     Tries backends in order:
     1. Piper Python API (if voice model is found/downloadable)
-    2. Piper CLI
-    3. macOS 'say' command (always available on macOS)
+    2. Piper CLI (requires voice .onnx model on disk)
+    3. espeak-ng (common Linux fallback)
+    4. macOS 'say' command (always available on macOS)
 
     Usage:
         tts = TextToSpeech(voice="en_US-lessac-medium")
@@ -86,7 +87,7 @@ class TextToSpeech:
         self.models_dir = Path(models_dir) if models_dir else Path.home() / ".local" / "share" / "piper"
         self.audio_manager = audio_manager
 
-        self._backend: Optional[str] = None  # "piper_python", "piper_cli", "say"
+        self._backend: Optional[str] = None  # "piper_python", "piper_cli", "espeak", "say"
         self._voice_path: Optional[Path] = None
         self._speaking = False
         self._speak_thread: Optional[threading.Thread] = None
@@ -117,13 +118,30 @@ class TextToSpeech:
                 capture_output=True, text=True, timeout=5,
             )
             if result.returncode == 0:
-                self._backend = "piper_cli"
-                logger.info("TTS backend: Piper CLI")
+                self._voice_path = self._find_voice_model()
+                if self._voice_path:
+                    self._backend = "piper_cli"
+                    logger.info(f"TTS backend: Piper CLI (voice: {self._voice_path})")
+                    return
+                else:
+                    logger.warning("Piper CLI available but voice model not found")
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+
+        # 3. Try espeak-ng (common Linux fallback)
+        try:
+            result = subprocess.run(
+                ["espeak-ng", "--version"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0:
+                self._backend = "espeak"
+                logger.info("TTS backend: espeak-ng")
                 return
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
 
-        # 3. macOS 'say' fallback
+        # 4. macOS 'say' fallback
         try:
             result = subprocess.run(
                 ["say", ""],
@@ -184,6 +202,8 @@ class TextToSpeech:
                 return self._speak_piper_python(text)
             elif self._backend == "piper_cli":
                 return self._speak_piper_cli(text)
+            elif self._backend == "espeak":
+                return self._speak_espeak(text)
             return False
         except Exception as e:
             logger.error(f"Error speaking: {e}")
@@ -228,7 +248,7 @@ class TextToSpeech:
             output_path = f.name
 
         try:
-            cmd = ["piper", "--model", self.voice, "--output_file", output_path]
+            cmd = ["piper", "--model", str(self._voice_path), "--output_file", output_path]
             if self.speed != 1.0:
                 cmd.extend(["--length_scale", str(1.0 / self.speed)])
 
@@ -249,6 +269,15 @@ class TextToSpeech:
             return True
         finally:
             Path(output_path).unlink(missing_ok=True)
+
+    def _speak_espeak(self, text: str) -> bool:
+        """Speak using espeak-ng (Linux fallback)."""
+        rate = int(175 * self.speed)
+        result = subprocess.run(
+            ["espeak-ng", "-s", str(rate), text],
+            capture_output=True,
+        )
+        return result.returncode == 0
 
     def speak_async(self, text: str) -> None:
         """Speak text without blocking."""

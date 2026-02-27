@@ -78,6 +78,9 @@ sudo apt install -y python3-dev python3-pip python3-venv
 
 # HDF5
 sudo apt install -y libhdf5-dev
+
+# TTS fallback (espeak-ng — used when piper-tts Python package is unavailable)
+sudo apt install -y espeak-ng
 ```
 
 Verify audio:
@@ -258,8 +261,20 @@ cd ~/desk-buddy/cs347w26-team7-desk-buddy/models
 wget https://huggingface.co/TheBloke/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf
 ```
 
-### Piper TTS voice:
+### Piper TTS binary + voice:
+
+> **Note:** The `piper-tts` Python package is **not compatible with Python 3.8** (JetPack 5.x). Install the standalone Piper binary instead. The code auto-detects the binary and falls back to `espeak-ng` if neither is available.
+
 ```bash
+# Install Piper aarch64 binary
+PIPER_VERSION="2023.11.14-2"
+wget -O /tmp/piper.tar.gz \
+  https://github.com/rhasspy/piper/releases/download/${PIPER_VERSION}/piper_linux_aarch64.tar.gz
+tar -xzf /tmp/piper.tar.gz -C /tmp
+sudo install -m 755 /tmp/piper/piper /usr/local/bin/piper
+piper --version  # verify
+
+# Download voice model
 mkdir -p ~/.local/share/piper && cd ~/.local/share/piper
 wget https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx
 wget https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json
@@ -375,5 +390,6 @@ model.export(format='engine', half=True, device=0)
 | PyAudio "no default input" | PortAudio missing | `sudo apt install portaudio19-dev` |
 | llama-cpp build fails | nvcc not on PATH | `export PATH=/usr/local/cuda/bin:$PATH` then rebuild |
 | TTS no audio on Linux | Piper voice not downloaded | Download `.onnx` + `.json` to `~/.local/share/piper/` (Step 8) |
+| `piper-tts` won't install (Python 3.8) | `piper-tts` requires Python ≥3.9 | Install Piper aarch64 binary (Step 8) or use `espeak-ng` as fallback |
 | sklearn pickle version mismatch | Different sklearn version | `pip install scikit-learn==<same version as dev machine>` |
 | Low FPS | Power mode / no TensorRT | `sudo nvpmodel -m 0 && sudo jetson_clocks`, export to TensorRT (Step 13) |

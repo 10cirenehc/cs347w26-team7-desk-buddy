@@ -63,7 +63,8 @@ install_system_packages() {
         libavcodec-dev libavformat-dev libswscale-dev \
         libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
         python3-dev python3-pip python3-venv \
-        libhdf5-dev
+        libhdf5-dev \
+        espeak-ng
 
     info "System packages installed."
 }
@@ -157,7 +158,36 @@ install_python_deps() {
     info "Python dependencies installed."
 }
 
-# ── Step 6: Download Piper TTS voice ────────────────────────────
+# ── Step 6: Install Piper TTS binary + voice ────────────────────
+install_piper_binary() {
+    if command -v piper &>/dev/null; then
+        info "Piper binary already installed: $(piper --version 2>&1 || true)"
+        return
+    fi
+
+    info "Downloading Piper TTS aarch64 binary..."
+    local PIPER_VERSION="2023.11.14-2"
+    local PIPER_URL="https://github.com/rhasspy/piper/releases/download/${PIPER_VERSION}/piper_linux_aarch64.tar.gz"
+    local TMP_DIR
+    TMP_DIR=$(mktemp -d)
+
+    wget -q -O "$TMP_DIR/piper.tar.gz" "$PIPER_URL" || {
+        warn "Piper binary download failed. espeak-ng will be used as TTS fallback."
+        rm -rf "$TMP_DIR"
+        return 1
+    }
+
+    tar -xzf "$TMP_DIR/piper.tar.gz" -C "$TMP_DIR"
+    sudo install -m 755 "$TMP_DIR/piper/piper" /usr/local/bin/piper
+    # Install shared libraries alongside the binary
+    if [ -d "$TMP_DIR/piper/lib" ]; then
+        sudo cp "$TMP_DIR/piper/lib"/* /usr/local/lib/
+        sudo ldconfig
+    fi
+    rm -rf "$TMP_DIR"
+    info "Piper binary installed to /usr/local/bin/piper"
+}
+
 download_piper_voice() {
     local PIPER_DIR="$HOME/.local/share/piper"
     local VOICE_ONNX="$PIPER_DIR/en_US-lessac-medium.onnx"
@@ -197,6 +227,7 @@ main() {
     check_opencv
     create_dirs
     install_python_deps
+    install_piper_binary
     download_piper_voice
 
     echo
