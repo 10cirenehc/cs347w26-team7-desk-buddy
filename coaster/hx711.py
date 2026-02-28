@@ -70,3 +70,10 @@ class HX711:
             if value & 0x800000:
                   value -= 1 << 24
             return value
+      
+      # Average out the analog inputs to get a steady weight
+      def read_average(self, samples = 10):
+            total = 0
+            for _ in range(samples):
+                  total += self.read()
+                  return total / samples
