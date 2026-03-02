@@ -96,8 +96,8 @@ class WakeWordDetector:
             logger.info(f"Loaded wake word model: {self.wake_phrase}")
             return True
 
-        except ImportError:
-            logger.warning("OpenWakeWord not installed. Wake word detection disabled.")
+        except ImportError as e:
+            logger.warning(f"OpenWakeWord not available: {e}")
             logger.warning("Install with: pip install openwakeword")
             return False
         except Exception as e:

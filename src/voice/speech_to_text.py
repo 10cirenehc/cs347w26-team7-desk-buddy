@@ -95,8 +95,8 @@ class SpeechToText:
             logger.info("Whisper model loaded")
             return True
 
-        except ImportError:
-            logger.warning("faster-whisper not installed. Speech recognition disabled.")
+        except ImportError as e:
+            logger.warning(f"faster-whisper not available: {e}")
             logger.warning("Install with: pip install faster-whisper")
             return False
         except Exception as e:

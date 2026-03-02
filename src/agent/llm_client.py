@@ -127,24 +127,31 @@ class LLMClient:
             if path.exists():
                 return str(path)
 
-        # Common model locations
         model_name = self.config.model
-        search_paths = [
-            Path.home() / ".cache" / "huggingface" / "hub",
-            Path.home() / "models",
-            Path("/models"),
-            Path.cwd() / "models",
-            Path.cwd() / "data" / "models",
-        ]
-
-        # Common file patterns for Llama models
         patterns = [
             f"*{model_name}*.gguf",
             f"*llama*8b*.gguf",
             f"*Meta-Llama*8B*.gguf",
         ]
 
-        for base_path in search_paths:
+        # Fast: check local ./models/ first (non-recursive)
+        fast_paths = [Path.cwd() / "models", Path.cwd() / "data" / "models"]
+        for base_path in fast_paths:
+            if not base_path.exists():
+                continue
+            for pattern in patterns:
+                matches = list(base_path.glob(pattern))
+                if matches:
+                    return str(matches[0])
+
+        # Slow fallback: recursive search in broader locations
+        logger.info("Model not in ./models/, searching other locations...")
+        slow_paths = [
+            Path.home() / "models",
+            Path("/models"),
+            Path.home() / ".cache" / "huggingface" / "hub",
+        ]
+        for base_path in slow_paths:
             if not base_path.exists():
                 continue
             for pattern in patterns:

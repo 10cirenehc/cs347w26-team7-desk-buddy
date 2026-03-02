@@ -151,7 +151,7 @@ class DeskBuddyApp:
             onnx_path = Path(cnn_config.get('onnx_path', 'data/trained_models/posture_cnn.onnx'))
             if not cnn_loaded and onnx_path.exists():
                 try:
-                    from .perception.posture_cnn import load_onnx_model
+                    from .perception.posture_cnn_onnx import load_onnx_model
                     self.cnn_model, cnn_metadata = load_onnx_model(str(onnx_path))
                     self.cnn_model.eval()
                     self.cnn_device = "cpu"  # ONNX runtime handles device internally
@@ -164,8 +164,8 @@ class DeskBuddyApp:
                     logger.info(f"CNN posture model loaded via ONNX "
                                 f"(channels={in_channels}, threshold={self.cnn_threshold:.2f})")
                     cnn_loaded = True
-                except ImportError:
-                    logger.info("onnxruntime not installed, trying PyTorch .pt fallback")
+                except Exception as e:
+                    logger.info(f"ONNX loading failed: {e}, trying PyTorch .pt fallback")
 
             # 2) PyTorch .pt path
             cnn_pt_path = Path(cnn_config.get('model_path', 'data/trained_models/posture_cnn.pt'))
