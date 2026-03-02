@@ -143,35 +143,58 @@ class DeskBuddyApp:
             self.presence_detector = PresenceDetector()
 
             # ----- CNN Posture Model (optional) -----
-            try:
-                import torch
-                from .perception.posture_cnn import load_model as load_cnn_model
+            # Try ONNX first (portable, no torch needed), then fall back to .pt
+            cnn_config = self.config.get('posture_cnn', {})
+            cnn_loaded = False
 
-                cnn_config = self.config.get('posture_cnn', {})
-                cnn_path = Path(cnn_config.get('model_path', 'data/trained_models/posture_cnn.pt'))
-                if cnn_path.exists():
+            # 1) ONNX path
+            onnx_path = Path(cnn_config.get('onnx_path', 'data/trained_models/posture_cnn.onnx'))
+            if not cnn_loaded and onnx_path.exists():
+                try:
+                    from .perception.posture_cnn import load_onnx_model
+                    self.cnn_model, cnn_metadata = load_onnx_model(str(onnx_path))
+                    self.cnn_model.eval()
+                    self.cnn_device = "cpu"  # ONNX runtime handles device internally
+
+                    in_channels = cnn_metadata.get("image_channels", 1)
+                    self.use_depth_images = (in_channels == 3)
+                    if cnn_metadata:
+                        self.cnn_threshold = max(0.55, cnn_metadata.get('optimal_threshold', 0.55))
+
+                    logger.info(f"CNN posture model loaded via ONNX "
+                                f"(channels={in_channels}, threshold={self.cnn_threshold:.2f})")
+                    cnn_loaded = True
+                except ImportError:
+                    logger.info("onnxruntime not installed, trying PyTorch .pt fallback")
+
+            # 2) PyTorch .pt path
+            cnn_pt_path = Path(cnn_config.get('model_path', 'data/trained_models/posture_cnn.pt'))
+            if not cnn_loaded and cnn_pt_path.exists():
+                try:
+                    import torch
+                    from .perception.posture_cnn import load_model as load_cnn_model
+
                     self.cnn_device = (
                         "cuda" if torch.cuda.is_available()
                         else "mps" if torch.backends.mps.is_available()
                         else "cpu"
                     )
-                    self.cnn_model, cnn_metadata = load_cnn_model(str(cnn_path), device=self.cnn_device)
+                    self.cnn_model, cnn_metadata = load_cnn_model(str(cnn_pt_path), device=self.cnn_device)
                     self.cnn_model.eval()
 
-                    # Auto-detect depth vs grayscale from model architecture
                     in_channels = self.cnn_model.cnn.conv1.in_channels
                     self.use_depth_images = (in_channels == 3)
-
-                    # Load threshold from metadata
                     if cnn_metadata:
                         self.cnn_threshold = max(0.55, cnn_metadata.get('optimal_threshold', 0.55))
 
                     logger.info(f"CNN posture model loaded on {self.cnn_device} "
                                 f"(channels={in_channels}, threshold={self.cnn_threshold:.2f})")
-                else:
-                    logger.info(f"No CNN model at {cnn_path}, using LogisticRegression fallback")
-            except ImportError:
-                logger.info("torch not installed, using LogisticRegression fallback")
+                    cnn_loaded = True
+                except ImportError:
+                    logger.info("torch not installed, using LogisticRegression fallback")
+
+            if not cnn_loaded:
+                logger.info("No CNN model available, using LogisticRegression fallback")
 
             # ----- State Logging -----
             logger.info("Setting up state logging...")

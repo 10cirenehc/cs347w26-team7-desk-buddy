@@ -1,0 +1,7 @@
+{
+  "image_channels": 3,
+  "num_features": 7,
+  "use_features": true,
+  "optimal_threshold": 0.4799999999999998,
+  "model_size": "normal"
+}
