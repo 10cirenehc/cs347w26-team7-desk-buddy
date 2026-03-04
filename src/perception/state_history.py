@@ -188,6 +188,11 @@ class StateHistory:
             if self._get_state_value(snap, state_type) == state_value:
                 state_time += dt
 
+        # Guard: require actual data to cover at least 50% of the requested window
+        # to prevent false alerts at startup (e.g., 5s of data triggering a 30-min streak)
+        if total_time < window_seconds * 0.5:
+            return 0.0
+
         return state_time / total_time if total_time > 0 else 0.0
 
     def state_counts(
