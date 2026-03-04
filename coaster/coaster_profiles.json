@@ -7,13 +7,13 @@
       "name": "Blue Yeti Mug",
       "cup_weight_grams": 215.0
     },
-    "last_drink_time": "2026-03-02T09:45:32.118400"
+    "last_sip_time": "2026-03-02T09:45:32.118400"
   },
   "Bob": {
     "name": "Bob",
     "daily_goal_ml": 2000.0,
     "reminder_frequency": 1800.0,
     "recent_cup": null,
-    "last_drink_time": null
+    "last_sip_time": null
   }
 }

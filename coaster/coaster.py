@@ -9,7 +9,7 @@ import time
 import json
 import Jetson.GPIO as GPIO
 from hx711 import HX711 # load cell library
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, asdict
 from datetime import datetime
 from typing import Optional
 
@@ -92,10 +92,10 @@ def load_calibration() -> Optional[Calibration]:
 def save_calibration(cal: Calibration) -> None:
       with open(CALIBRATION_FILE, "w") as file:
             json.dump(asdict(cal), file, indent=2)
-      print("{CALIBRATION_FILE} updated.")
+      print(f"{CALIBRATION_FILE} updated.")
 
-def calibrate(self, load_cell: HX711) -> bool:
-      print("ENTERING CALIIBRATION")
+def calibrate(load_cell: HX711) -> bool:
+      print("ENTERING CALIBRATION")
       response = input("Ensure nothing is on the coaster. Enter 'Y' to continue: ").strip().lower()
       if response != "y":
             print("ERROR:\tfailed to calibrate.")
@@ -126,6 +126,13 @@ def calibrate(self, load_cell: HX711) -> bool:
       return True
 
 #
+# LOAD CELL -> GRAMS
+#
+def read_grams(cal: Calibration, load_cell: HX711) -> float:
+      raw = load_cell.read_average()
+      return ((raw-cal.raw_zero_value)/cal.scale_factor)
+
+#
 # COASTER CLASS
 #
 class SmartCoaster:
@@ -153,7 +160,7 @@ class SmartCoaster:
             if sip_amount >= SIP_THRESHOLD_GRAMS:
                   self.intake_ml += sip_amount
                   if self.profile:
-                        self.profile.last_drink_time = datetime.now().isoformat()
+                        self.profile.last_sip_time = datetime.now().isoformat()
                   self.last_reminder = time.time() # update reminder timer in profile
                   return sip_amount
             return None
@@ -161,7 +168,7 @@ class SmartCoaster:
       # Mainly for Display
       def get_status(self) -> str:
             goal = self.profile.daily_goal_ml if self.profile else None
-            msg = [f"\tTotal intake:\t{self.intake_ml:..0f} mL"]
+            msg = [f"\tTotal intake:\t{self.intake_ml:.0f} mL"]
             if goal:
                   percent = min(100, (self.intake_ml / goal * 100))
                   msg.append(f"\tDaily goal:\t{goal:.0f} mL ({percent:.0f}% reached)")
@@ -172,16 +179,13 @@ class SmartCoaster:
 #
 # FREE MODE
 #
-def free_mode(load_cell: HX711):
-      print("ENTERING FREE MODE")
-      # TO FIX SHOULD BE READING FROM LOAD CELL
-      cup_wgt = input("Enter empty cup weight in grams (or 0 to skip): ")
-      try:
-            tare = float(cup_wgt)
-      except ValueError:
-            tare = 0.0
-      
-      cup = Cup(name="Unknown Cup", cup_weight_grams=tare) if tare > 0 else None
+def free_mode(cal: Calibration, load_cell: HX711):
+      print("ENTERING FREE MODE\n")
+      print("Place your empty cup on the coaster.")
+      input("\tPress Enter when ready.")
+      tare = read_grams(cal, load_cell)
+      print(f"\tCup tare recorded: {tare:.1f}g")
+      cup = Cup(name="Unknown Cup", cup_weight_grams=tare) if tare > 0 else None      
       coaster = SmartCoaster(profile=None)
       coaster.cup = cup
 
@@ -192,7 +196,7 @@ def free_mode(load_cell: HX711):
             if cmd == "q": # quit
                   break
             else:
-                  weight = load_cell.read_average() # load cell read
+                  weight = read_grams(cal, load_cell) # load cell read
                   sipped = coaster.process_sip(weight)
                   if sipped:
                         print(f"\t~{sipped:.0f} mL sip detected.")
@@ -207,7 +211,7 @@ def free_mode(load_cell: HX711):
 #
 def select_profile(profiles: dict[str, Profile]) -> Profile:
       if profiles:
-            print
+            print("\nExisting profiles:",",".join(profiles.keys()))
       name = input("Enter new or existing profile name: ").strip()
       if name in profiles:
             print(f"\tLoading profile: {name}")
@@ -221,7 +225,7 @@ def select_profile(profiles: dict[str, Profile]) -> Profile:
 
 def select_cup(profile: Profile) -> Cup:
       if profile.recent_cup:
-            print(f"\Most recent cup: '{profile.recent_cup}' (tare: {profile.recent_cup.cup_weight_grams}g)")
+            print(f"Most recent cup: '{profile.recent_cup.name}' (tare: {profile.recent_cup.cup_weight_grams}g)")
             use_last = input("\tWould you like to use this cup again? [y/n]").strip().lower()
             if use_last != "n":
                   return profile.recent_cup
@@ -232,21 +236,22 @@ def select_cup(profile: Profile) -> Cup:
       return cup
 
 
-def profile_mode(profiles: dict[str, Profile], load_cell: HX711):
-      print("ENTERING PROFILE MODE")
+def profile_mode(profiles: dict[str, Profile], cal: Calibration, load_cell: HX711):
+      print("ENTERING PROFILE MODE\n")
       profile = select_profile(profiles)
       cup = select_cup(profile)
 
       coaster = SmartCoaster(profile=profile)
       coaster.cup = cup
 
+      print("Profile mode running.")
       try:
             while True:
                   cmd = input(f"[{profile.name}] > ").strip().lower()
                   if cmd == "q": # quit
                         break
                   else:
-                        weight = load_cell.read_average()
+                        weight = read_grams(cal, load_cell)
                         sipped = coaster.process_sip(weight)
                         if sipped:
                               print(f"\t~{sipped:.0f} mL sip detected.")
@@ -265,13 +270,21 @@ def main():
       profiles = load_profile()
       my_load = HX711(SCK_PIN, DT_PIN, 128)
 
+      cal = load_calibration()
+      if cal is None:
+            print("No calibration found. Please calibrate first.")
+            success = calibrate(my_load)
+            if not success:
+                  return
+            cal = load_calibration()  # reload file
+
       print("1. Profile Mode")
       print("2. Free Mode")
       mode = input("Enter mode number [1/2]: ").strip() # removing whitespace
       if mode == "1":
-            profile_mode(profiles)
+            profile_mode(profiles, cal, my_load)
       elif mode == "2":
-            free_mode()
+            free_mode(cal, my_load)
       elif mode == "00": # secret code for calibration
             calibrate(my_load)
       else:
