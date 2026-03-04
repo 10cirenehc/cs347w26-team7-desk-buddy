@@ -6,6 +6,7 @@ to emit events that consumers (LCDController, main loop) can subscribe to.
 """
 
 import logging
+import threading
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -46,24 +47,28 @@ class EventBus:
 
     def __init__(self):
         self._subscribers: Dict[EventType, List[Callable[[Event], None]]] = {}
+        self._lock = threading.Lock()
 
     def subscribe(self, event_type: EventType, callback: Callable[[Event], None]) -> None:
         """Register a callback for an event type."""
-        if event_type not in self._subscribers:
-            self._subscribers[event_type] = []
-        self._subscribers[event_type].append(callback)
+        with self._lock:
+            if event_type not in self._subscribers:
+                self._subscribers[event_type] = []
+            self._subscribers[event_type].append(callback)
 
     def unsubscribe(self, event_type: EventType, callback: Callable[[Event], None]) -> None:
         """Remove a callback for an event type."""
-        if event_type in self._subscribers:
-            try:
-                self._subscribers[event_type].remove(callback)
-            except ValueError:
-                pass
+        with self._lock:
+            if event_type in self._subscribers:
+                try:
+                    self._subscribers[event_type].remove(callback)
+                except ValueError:
+                    pass
 
     def emit(self, event: Event) -> None:
         """Emit an event, calling all registered callbacks synchronously."""
-        callbacks = self._subscribers.get(event.type, [])
+        with self._lock:
+            callbacks = list(self._subscribers.get(event.type, []))
         for callback in callbacks:
             try:
                 callback(event)

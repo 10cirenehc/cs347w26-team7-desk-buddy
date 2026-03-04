@@ -120,6 +120,9 @@ class DeskBuddyApp:
         self.lcd = None
         self.hydration = None
 
+        # Voice processing flag (prevents concurrent voice commands)
+        self._voice_processing = False
+
     async def setup(self) -> bool:
         """
         Initialize all components.
@@ -333,6 +336,8 @@ class DeskBuddyApp:
                 logger.info("LCD not available, continuing without display")
                 self.lcd = None
                 self.enable_lcd = False
+            else:
+                self.lcd.start()  # spawn render thread
         except Exception as e:
             logger.warning(f"LCD setup failed: {e}")
             self.lcd = None
@@ -637,8 +642,9 @@ class DeskBuddyApp:
                 )
 
                 # ----- Voice Commands -----
-                if self.enable_voice and self.wake_word and self.wake_word.detected():
-                    await self._handle_voice_command()
+                if (self.enable_voice and self.wake_word
+                        and self.wake_word.detected() and not self._voice_processing):
+                    asyncio.ensure_future(self._handle_voice_command_async())
 
                 # ----- Focus Session -----
                 if self.session:
@@ -659,7 +665,7 @@ class DeskBuddyApp:
                     hydration_status = self.hydration.get_hydration_status() if self.hydration else {}
                     timer_status = self._get_timer_status()
                     self.lcd.update(posture, focus, hydration_status, timer_status)
-                    lcd_action = self.lcd.tick()
+                    lcd_action = self.lcd.poll_action()
                     if lcd_action:
                         await self._handle_lcd_action(lcd_action)
 
@@ -687,17 +693,39 @@ class DeskBuddyApp:
         finally:
             await self.shutdown()
 
-    async def _handle_voice_command(self) -> None:
-        """Handle voice command after wake word detected."""
+    async def _handle_voice_command_async(self) -> None:
+        """Run the blocking voice pipeline in a thread pool so the main loop continues."""
         if not self.stt or not self.agent:
             return
 
-        logger.info("Wake word detected, listening for command...")
+        self._voice_processing = True
+        try:
+            loop = asyncio.get_running_loop()
 
-        if self.tts:
-            self.tts.speak("Yes?")
+            logger.info("Wake word detected, listening for command...")
+            if self.tts:
+                self.tts.speak("Yes?")
 
-        # Listen and transcribe
+            # Run blocking listen→transcribe→query in a thread pool thread
+            result = await loop.run_in_executor(None, self._voice_pipeline_sync)
+
+            if result is None:
+                return
+
+            response, pending = result
+
+            # Speak response
+            if self.tts and response:
+                self.tts.speak(response)
+
+            # Execute pending desk action if any
+            if pending:
+                await self._handle_desk_command(pending)
+        finally:
+            self._voice_processing = False
+
+    def _voice_pipeline_sync(self):
+        """Blocking voice pipeline: listen → transcribe → query.  Runs in thread pool."""
         result = self.stt.listen_and_transcribe(
             self.audio_manager,
             timeout_seconds=10,
@@ -705,21 +733,13 @@ class DeskBuddyApp:
 
         if not result.text:
             logger.info("No speech detected")
-            return
+            return None
 
         logger.info(f"Transcribed: {result.text}")
 
-        # Process with agent
         response = self.agent.process_query(result.text)
-
-        # Speak response
-        if self.tts:
-            self.tts.speak(response)
-
-        # Execute pending desk action if any
         pending = self.agent.get_pending_desk_action()
-        if pending:
-            await self._handle_desk_command(pending)
+        return response, pending
 
     def _get_timer_status(self) -> Optional[dict]:
         """Get timer status dict for LCD display."""

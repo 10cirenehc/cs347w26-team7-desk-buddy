@@ -20,6 +20,19 @@ from .lcd_drawing import (
     load_wallpaper,
 )
 
+# ── Render caches ──
+_dimmed_wallpaper_cache: Dict[int, Image.Image] = {}  # id(wallpaper_img) -> dimmed copy
+_thumbnail_cache: Dict[Tuple[str, int, int], Image.Image] = {}  # (path, w, h) -> resized
+_timer_done_ring_cache: Optional[Image.Image] = None  # pre-rendered RGBA ring overlay
+
+
+def invalidate_caches() -> None:
+    """Clear all render caches (call when wallpaper changes)."""
+    global _timer_done_ring_cache
+    _dimmed_wallpaper_cache.clear()
+    _thumbnail_cache.clear()
+    _timer_done_ring_cache = None
+
 
 def render_home(
     posture_state: str,
@@ -35,12 +48,16 @@ def render_home(
     Shows posture icon, focus state, hydration progress, and timer status.
     """
     if wallpaper_img:
-        img = wallpaper_img.copy()
-        d = ImageDraw.Draw(img)
-        # Dim overlay for readability
-        overlay = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 140))
-        img.paste(Image.new("RGB", (WIDTH, HEIGHT), (0, 0, 0)),
-                  mask=overlay.split()[3])
+        wp_id = id(wallpaper_img)
+        if wp_id not in _dimmed_wallpaper_cache:
+            # Build dimmed wallpaper once and cache it
+            base = wallpaper_img.copy()
+            overlay = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 140))
+            base.paste(Image.new("RGB", (WIDTH, HEIGHT), (0, 0, 0)),
+                       mask=overlay.split()[3])
+            _dimmed_wallpaper_cache.clear()  # only keep one cached
+            _dimmed_wallpaper_cache[wp_id] = base
+        img = _dimmed_wallpaper_cache[wp_id].copy()
         d = ImageDraw.Draw(img)
     else:
         img, d = blank_canvas()
@@ -263,16 +280,25 @@ def render_timer_run(remaining_secs: int, total_secs: int) -> Tuple[Image.Image,
 
 def render_timer_done() -> Tuple[Image.Image, Dict]:
     """Render timer completion screen with glowing rings."""
+    global _timer_done_ring_cache
+
     img, d = blank_canvas()
     draw_realtime_clock(d)
 
     cx, cy = WIDTH // 2, HEIGHT // 2 - 20
-    for r, alpha in [(70, 40), (55, 80), (40, 160)]:
-        ring = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
-        rd = ImageDraw.Draw(ring)
-        col = (*C_ACCENT2, alpha)
-        rd.ellipse([cx - r, cy - r, cx + r, cy + r], outline=col, width=4)
-        img = Image.alpha_composite(img.convert("RGBA"), ring).convert("RGB")
+
+    # Build ring overlay once and reuse
+    if _timer_done_ring_cache is None:
+        ring_overlay = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
+        for r, alpha in [(70, 40), (55, 80), (40, 160)]:
+            ring = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
+            rd = ImageDraw.Draw(ring)
+            col = (*C_ACCENT2, alpha)
+            rd.ellipse([cx - r, cy - r, cx + r, cy + r], outline=col, width=4)
+            ring_overlay = Image.alpha_composite(ring_overlay, ring)
+        _timer_done_ring_cache = ring_overlay
+
+    img = Image.alpha_composite(img.convert("RGBA"), _timer_done_ring_cache).convert("RGB")
     d = ImageDraw.Draw(img)
 
     centered_text(d, WIDTH // 2, cy, "Done!", FONT_LARGE, fill=C_OK)
@@ -310,8 +336,12 @@ def render_wallpaper_picker(current_idx: int,
         y1 = y0 + thumb_h
 
         try:
-            thumb = load_wallpaper(wp).resize((thumb_w, thumb_h), Image.BICUBIC)
-            img.paste(thumb, (x0, y0))
+            cache_key = (wp, thumb_w, thumb_h)
+            if cache_key not in _thumbnail_cache:
+                _thumbnail_cache[cache_key] = load_wallpaper(wp).resize(
+                    (thumb_w, thumb_h), Image.BICUBIC
+                )
+            img.paste(_thumbnail_cache[cache_key], (x0, y0))
         except Exception:
             rounded_rect(d, x0, y0, x1, y1, fill=C_BTN)
 
