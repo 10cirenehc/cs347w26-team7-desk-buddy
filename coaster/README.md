@@ -2,6 +2,17 @@
 
 # Software/API
 
+## HX711 Class
+Found in `hx711.py`
+
+## SmartCoaster Class
+Found in `coaster.py`
+
+## Dataclasses
+Found in `coaster.py`
+### Calibration
+### Cup
+### Profile
 
 ## File Descriptions
 
@@ -26,5 +37,6 @@ I already soldered VCC and VDD together on the HX711 board, so only one of them 
 - Data (Purple) -> 29 (Output)
 
 ## Coaster 3D Print
-(Link)[https://cad.onshape.com/documents/2e91cbeae698b6ab89716089/w/e1222bfd9f4ff7c4da097b5e/e/e275416058a4f195d6499203?renderMode=0&uiState=69a8888a4e89299f92843471]
-Made by Janet Bai
+Made by Janet Bai:
+
+[Link](https://cad.onshape.com/documents/2e91cbeae698b6ab89716089/w/e1222bfd9f4ff7c4da097b5e/e/e275416058a4f195d6499203?renderMode=0&uiState=69a8888a4e89299f92843471)
