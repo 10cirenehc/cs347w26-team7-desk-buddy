@@ -17,22 +17,19 @@ from typing import Optional
 # CONSTANTS
 #
 PROFILE_FILE = "coaster_profiles.json"
+CALIBRATION_FILE = "calibration.json"
 REMINDER_FREQ_SECONDS = (30 * 60) # every 30 minutes
 SIP_THRESHOLD_GRAMS = 10 # min for what counts as a sip
 EMPTY_CUP_GRAMS = 5 # empty cup or no cup on coaster
 
 #
-# SCALE CLASS
+# LOAD CELL CONFIG
 #
 GPIO.setmode(GPIO.BOARD)
 GPIO.setwarnings(False)
 
 DT_PIN = 29
 SCK_PIN = 31
-
-class Scale:
-      def __init__(self, load_cell: HX711):
-            load_cell
 
 #
 # DATACLASSES
@@ -51,7 +48,7 @@ class Profile:
       last_sip_time: Optional[str] = None
 
 #
-# JSON
+# PROFILES.JSON
 #
 def load_profile() -> dict[str, Profile]:
       if not os.path.exists(PROFILE_FILE):
@@ -73,6 +70,60 @@ def save_profile(profiles: dict[str, Profile]) -> None:
       with open(PROFILE_FILE, "w") as file:
             json.dump(bulk_list, file, indent = 2)
       print(f"Written to {PROFILE_FILE}")
+
+#
+# CALIBRATION
+#
+@dataclass
+class Calibration:
+      raw_zero_value: float
+      raw_ref_value: float
+      ref_weight_grams: float
+      scale_factor: float
+      last_calibrated: str
+
+def load_calibration() -> Optional[Calibration]:
+      if not os.path.exists(CALIBRATION_FILE):
+            return None
+      with open(CALIBRATION_FILE, "r") as file:
+            data = json.load(file)
+      return Calibration(**data)
+
+def save_calibration(cal: Calibration) -> None:
+      with open(CALIBRATION_FILE, "w") as file:
+            json.dump(asdict(cal), file, indent=2)
+      print("{CALIBRATION_FILE} updated.")
+
+def calibrate(self, load_cell: HX711) -> bool:
+      print("ENTERING CALIIBRATION")
+      response = input("Ensure nothing is on the coaster. Enter 'Y' to continue: ").strip().lower()
+      if response != "y":
+            print("ERROR:\tfailed to calibrate.")
+            print("Exiting calibration.")
+            return False
+      scale_zero = load_cell.read_average()
+      print("Scale zero has been updated.")
+      ref_wgt_grams = input("Choose a reference object. Enter the object's weight in grams: ").strip()
+      ref_wgt_grams = float(ref_wgt_grams)
+      response = input("Place the reference object on the coaster. Enter 'Y' to continue: ").strip().lower()
+      if response != "y":
+            print("ERROR:\tfailed to calibrate.")
+            print("Exiting calibration.")
+            return False
+      ref_wgt_analog = load_cell.read_average()
+      print(f"Reading {ref_wgt_grams}g = {ref_wgt_analog}")
+      raw_per_gram = (ref_wgt_analog - scale_zero) / ref_wgt_grams
+      cal = Calibration(
+            raw_zero_value=scale_zero,
+            raw_ref_value=ref_wgt_analog,
+            ref_weight_grams=ref_wgt_grams,
+            scale_factor=raw_per_gram,
+            last_calibrated=datetime.now().isoformat()
+      )
+      save_calibration(cal)
+      print(f"Found scale factor: {raw_per_gram:.4f}")
+      print("Calibration complete!")
+      return True
 
 #
 # COASTER CLASS
@@ -107,7 +158,7 @@ class SmartCoaster:
                   return sip_amount
             return None
       
-      # Mainly for display
+      # Mainly for Display
       def get_status(self) -> str:
             goal = self.profile.daily_goal_ml if self.profile else None
             msg = [f"\tTotal intake:\t{self.intake_ml:..0f} mL"]
@@ -121,7 +172,7 @@ class SmartCoaster:
 #
 # FREE MODE
 #
-def free_mode():
+def free_mode(load_cell: HX711):
       print("ENTERING FREE MODE")
       # TO FIX SHOULD BE READING FROM LOAD CELL
       cup_wgt = input("Enter empty cup weight in grams (or 0 to skip): ")
@@ -137,15 +188,19 @@ def free_mode():
       # Free Mode Main Loop
       print("Free mode running.")
       while True:
-            weight =  # load cell read
-            sipped = coaster.process_sip(weight)
-            if sipped:
-                  print(f"\t~{sipped:.0f} mL sip detected.")
+            cmd = input("[free mode] > ").strip().lower()
+            if cmd == "q": # quit
+                  break
             else:
-                  print("\tNo significant sip detected.")
-            
-            if coaster.poll_reminder():
-                  print("Alert: Time to drink some water")
+                  weight = load_cell.read_average() # load cell read
+                  sipped = coaster.process_sip(weight)
+                  if sipped:
+                        print(f"\t~{sipped:.0f} mL sip detected.")
+                  else:
+                        print("\tNo significant sip detected.")
+                  
+                  if coaster.poll_reminder():
+                        print("Alert: Time to drink some water")
 
 #
 # PROFILE MODE
@@ -165,36 +220,60 @@ def select_profile(profiles: dict[str, Profile]) -> Profile:
             return profile
 
 def select_cup(profile: Profile) -> Cup:
-      if profile.last_cup:
+      if profile.recent_cup:
             print(f"\Most recent cup: '{profile.recent_cup}' (tare: {profile.recent_cup.cup_weight_grams}g)")
             use_last = input("\tWould you like to use this cup again? [y/n]").strip().lower()
             if use_last != "n":
                   return profile.recent_cup
       name = input("Enter cup name: ").strip() or "Default Cup"
       tare = input("Enter cup tare weight in grams: ").strip()
-      cup = Cup(name=name, tare_weight_grams=float(tare) if tare else 0.0)
+      cup = Cup(name=name, cup_weight_grams=float(tare) if tare else 0.0)
       profile.recent_cup = cup # save for next time
       return cup
 
 
-def profile_mode(profiles: dict[str, Profile]):
+def profile_mode(profiles: dict[str, Profile], load_cell: HX711):
       print("ENTERING PROFILE MODE")
       profile = select_profile(profiles)
       cup = select_cup(profile)
+
+      coaster = SmartCoaster(profile=profile)
+      coaster.cup = cup
+
+      try:
+            while True:
+                  cmd = input(f"[{profile.name}] > ").strip().lower()
+                  if cmd == "q": # quit
+                        break
+                  else:
+                        weight = load_cell.read_average()
+                        sipped = coaster.process_sip(weight)
+                        if sipped:
+                              print(f"\t~{sipped:.0f} mL sip detected.")
+                        else:
+                              print("\tNo significant sip detected.")
+                        if coaster.poll_reminder():
+                              print("Alert: Time to drink some water")
+      finally:
+            save_profile(profiles)
+            print("Profile saved.")
 
 #
 # MAIN FUNCTION
 #
 def main():
       profiles = load_profile()
-      myLoad = HX711(SCK_PIN, DT_PIN, 128)
+      my_load = HX711(SCK_PIN, DT_PIN, 128)
 
-      mode = input("Select mode: ").strip() # removing whitespace
-
-      if mode == "":
+      print("1. Profile Mode")
+      print("2. Free Mode")
+      mode = input("Enter mode number [1/2]: ").strip() # removing whitespace
+      if mode == "1":
             profile_mode(profiles)
-      elif mode == "":
+      elif mode == "2":
             free_mode()
+      elif mode == "00": # secret code for calibration
+            calibrate(my_load)
       else:
             print("ERROR:\tinvalid mode choice.")
             print("Exiting program.")

@@ -20,18 +20,18 @@ class HX711:
             self.set_gain(gain)
             self.reset()
       
-      def reset(self):
+      def reset(self) -> None:
         # Power down then power back up
         GPIO.output(self.__pd_sck, True)
         time.sleep(0.0001)
         GPIO.output(self.__pd_sck, False)
         time.sleep(0.4)
 
-      def is_ready(self):
+      def is_ready(self) -> bool:
             # When DOUT goes low, data is ready for retrieval
             return (not GPIO.input(self.__dout))
       
-      def set_gain(self, gain):
+      def set_gain(self, gain) -> None:
             if (gain == 128): # Channel A, gain factor 128
                   self.__gpulse = 1
             elif (gain == 64): # Ch A, gain factor 64
