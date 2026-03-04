@@ -12,7 +12,7 @@ mediapipe>=0.10.9
 
 # Voice I/O
 pyaudio>=0.2.13
-faster-whisper>=0.10.0
+openai-whisper>=20231117
 # piper-tts — incompatible with Python 3.8 (JetPack 5.x); use Piper binary instead
 # Install via: scripts/setup_jetson.sh (downloads aarch64 binary to /usr/local/bin/piper)
 openwakeword>=0.6.0

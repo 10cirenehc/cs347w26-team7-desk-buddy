@@ -1,7 +1,9 @@
 """
-Speech-to-text using Whisper (faster-whisper).
+Speech-to-text using Whisper (faster-whisper or openai-whisper fallback).
 
 Transcribes voice commands after wake word detection.
+Tries faster-whisper first (faster, needs ctranslate2), then falls back to
+openai-whisper (PyTorch-based, works on Jetson AGX Orin out of the box).
 """
 
 import logging
@@ -25,9 +27,10 @@ class TranscriptionResult:
 
 class SpeechToText:
     """
-    Speech-to-text using Whisper (faster-whisper).
+    Speech-to-text using Whisper (faster-whisper or openai-whisper).
 
-    Provides fast, accurate speech recognition for voice commands.
+    Tries faster-whisper first (CTranslate2, faster inference), then falls back
+    to openai-whisper (PyTorch, works on Jetson where ctranslate2 is unavailable).
 
     Usage:
         stt = SpeechToText(model_size="base")
@@ -65,10 +68,23 @@ class SpeechToText:
         self.language = language
 
         self._model = None
+        self._backend = None  # "faster_whisper" or "openai_whisper"
         self._init_model()
 
     def _init_model(self) -> bool:
-        """Initialize the Whisper model."""
+        """Initialize the Whisper model, trying backends in order."""
+        # Try 1: faster-whisper (faster, but needs ctranslate2)
+        if self._init_faster_whisper():
+            return True
+        # Try 2: openai-whisper (uses PyTorch directly, works on Jetson)
+        if self._init_openai_whisper():
+            return True
+        logger.warning("No Whisper backend available. Speech recognition disabled.")
+        logger.warning("Install one of: pip install faster-whisper  OR  pip install openai-whisper")
+        return False
+
+    def _init_faster_whisper(self) -> bool:
+        """Try to initialize using faster-whisper (CTranslate2 backend)."""
         try:
             from faster_whisper import WhisperModel
 
@@ -86,21 +102,47 @@ class SpeechToText:
             if compute_type == "auto":
                 compute_type = "float16" if device == "cuda" else "int8"
 
-            logger.info(f"Loading Whisper model: {self.model_size} on {device}")
+            logger.info(f"Loading Whisper model (faster-whisper): {self.model_size} on {device}")
             self._model = WhisperModel(
                 self.model_size,
                 device=device,
                 compute_type=compute_type,
             )
-            logger.info("Whisper model loaded")
+            self._backend = "faster_whisper"
+            logger.info("Whisper model loaded (faster-whisper backend)")
             return True
 
         except ImportError as e:
-            logger.warning(f"faster-whisper not available: {e}")
-            logger.warning("Install with: pip install faster-whisper")
+            logger.info(f"faster-whisper not available: {e}")
             return False
         except Exception as e:
-            logger.error(f"Failed to load Whisper model: {e}")
+            logger.error(f"Failed to load faster-whisper model: {e}")
+            return False
+
+    def _init_openai_whisper(self) -> bool:
+        """Try to initialize using openai-whisper (PyTorch backend)."""
+        try:
+            import whisper
+
+            device = self.device
+            if device == "auto":
+                try:
+                    import torch
+                    device = "cuda" if torch.cuda.is_available() else "cpu"
+                except ImportError:
+                    device = "cpu"
+
+            logger.info(f"Loading Whisper model (openai-whisper): {self.model_size} on {device}")
+            self._model = whisper.load_model(self.model_size, device=device)
+            self._backend = "openai_whisper"
+            logger.info("Whisper model loaded (openai-whisper backend)")
+            return True
+
+        except ImportError as e:
+            logger.info(f"openai-whisper not available: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Failed to load openai-whisper model: {e}")
             return False
 
     def transcribe(
@@ -144,7 +186,16 @@ class SpeechToText:
             except ImportError:
                 logger.warning(f"Audio sample rate is {sample_rate}, expected 16000")
 
-        # Transcribe
+        # Dispatch to the appropriate backend
+        if self._backend == "openai_whisper":
+            return self._transcribe_openai_whisper(audio, start_time)
+        else:
+            return self._transcribe_faster_whisper(audio, start_time)
+
+    def _transcribe_faster_whisper(
+        self, audio: np.ndarray, start_time: float
+    ) -> TranscriptionResult:
+        """Transcribe using faster-whisper backend."""
         segments, info = self._model.transcribe(
             audio,
             language=self.language,
@@ -171,11 +222,7 @@ class SpeechToText:
         duration = time.time() - start_time
 
         # Calculate average confidence
-        confidence = 0.0
-        if segment_list:
-            confidence = sum(s["confidence"] for s in segment_list) / len(segment_list)
-            # Convert log probability to rough confidence score
-            confidence = min(1.0, max(0.0, (confidence + 1.0) / 1.0))
+        confidence = self._compute_confidence(segment_list)
 
         return TranscriptionResult(
             text=full_text,
@@ -184,6 +231,57 @@ class SpeechToText:
             duration_seconds=duration,
             segments=segment_list,
         )
+
+    def _transcribe_openai_whisper(
+        self, audio: np.ndarray, start_time: float
+    ) -> TranscriptionResult:
+        """Transcribe using openai-whisper backend."""
+        # Determine if fp16 is appropriate (only on CUDA)
+        use_fp16 = False
+        try:
+            import torch
+            use_fp16 = next(self._model.parameters()).is_cuda
+        except Exception:
+            pass
+
+        result = self._model.transcribe(
+            audio,
+            language=self.language,
+            fp16=use_fp16,
+        )
+
+        # Collect segments (openai-whisper returns dicts)
+        segment_list = []
+        for seg in result.get("segments", []):
+            segment_list.append({
+                "start": seg["start"],
+                "end": seg["end"],
+                "text": seg["text"],
+                "confidence": seg.get("avg_logprob", 0.0),
+            })
+
+        full_text = result.get("text", "").strip()
+        duration = time.time() - start_time
+
+        # Calculate average confidence
+        confidence = self._compute_confidence(segment_list)
+
+        return TranscriptionResult(
+            text=full_text,
+            language=result.get("language", self.language),
+            confidence=confidence,
+            duration_seconds=duration,
+            segments=segment_list,
+        )
+
+    @staticmethod
+    def _compute_confidence(segment_list: List[dict]) -> float:
+        """Compute average confidence from segment log probabilities."""
+        if not segment_list:
+            return 0.0
+        avg_logprob = sum(s["confidence"] for s in segment_list) / len(segment_list)
+        # Convert log probability to rough confidence score
+        return min(1.0, max(0.0, (avg_logprob + 1.0) / 1.0))
 
     def listen_and_transcribe(
         self,

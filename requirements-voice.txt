@@ -3,6 +3,8 @@
 
 pyaudio>=0.2.13
 faster-whisper>=0.10.0
+# Fallback STT backend for Jetson (where ctranslate2/faster-whisper fails):
+# pip install openai-whisper>=20231117
 piper-tts>=1.2.0
 openwakeword>=0.6.0
 
