@@ -175,6 +175,16 @@ class SmartCoaster:
             if self.cup:
                   msg.append(f"\tCurrent cup:\t{self.cup.name} (tare: {self.cup.cup_weight_grams}g)")
             return "\n".join(msg)
+
+      def get_total_intake(self) -> float:
+            return self.intake_ml
+      
+      def get_percent_goal(self):
+            goal = self.profile.daily_goal_ml if self.profile else None
+            if goal:
+                  percent = min(100, (self.intake_ml / goal * 100))
+                  return percent
+            return None
       
 #
 # FREE MODE
