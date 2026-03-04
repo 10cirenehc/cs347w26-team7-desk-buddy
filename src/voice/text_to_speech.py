@@ -75,17 +75,22 @@ class TextToSpeech:
         },
     }
 
+    # Ordered fallback chain for runtime TTS attempts
+    _SPEAK_CHAIN = ["piper_python", "piper_cli", "espeak", "say"]
+
     def __init__(
         self,
         voice: str = "en_US-lessac-medium",
         speed: float = 1.0,
         models_dir: Optional[str] = None,
         audio_manager=None,
+        audio_device: Optional[str] = None,
     ):
         self.voice = voice
         self.speed = speed
         self.models_dir = Path(models_dir) if models_dir else Path.home() / ".local" / "share" / "piper"
         self.audio_manager = audio_manager
+        self.audio_device = audio_device
 
         self._backend: Optional[str] = None  # "piper_python", "piper_cli", "espeak", "say"
         self._voice_path: Optional[Path] = None
@@ -193,20 +198,32 @@ class TextToSpeech:
             return True
 
     def _speak_impl(self, text: str) -> bool:
-        """Speak text (called from any thread)."""
+        """Speak text with runtime fallback chain (called from any thread)."""
         self._speaking = True
         try:
-            if self._backend == "say":
-                return self._speak_say(text)
-            elif self._backend == "piper_python":
-                return self._speak_piper_python(text)
-            elif self._backend == "piper_cli":
-                return self._speak_piper_cli(text)
-            elif self._backend == "espeak":
-                return self._speak_espeak(text)
-            return False
-        except Exception as e:
-            logger.error(f"Error speaking: {e}")
+            methods = {
+                "piper_python": self._speak_piper_python,
+                "piper_cli": self._speak_piper_cli,
+                "espeak": self._speak_espeak,
+                "say": self._speak_say,
+            }
+
+            # Start from the selected backend and fall through on failure
+            try:
+                start = self._SPEAK_CHAIN.index(self._backend)
+            except (ValueError, TypeError):
+                start = 0
+
+            for name in self._SPEAK_CHAIN[start:]:
+                try:
+                    if methods[name](text):
+                        if name != self._backend:
+                            logger.info(f"TTS fell back to '{name}' backend")
+                        return True
+                except Exception as e:
+                    logger.debug(f"TTS backend '{name}' failed: {e}")
+
+            logger.error("All TTS backends failed")
             return False
         finally:
             self._speaking = False
@@ -255,8 +272,7 @@ class TextToSpeech:
             result = subprocess.run(cmd, input=text, capture_output=True, text=True)
             if result.returncode != 0:
                 logger.error(f"Piper CLI error: {result.stderr}")
-                # Fall back to say
-                return self._speak_say(text)
+                return False
 
             import wave
             with wave.open(output_path, 'rb') as wf:
@@ -273,11 +289,25 @@ class TextToSpeech:
     def _speak_espeak(self, text: str) -> bool:
         """Speak using espeak-ng (Linux fallback)."""
         rate = int(175 * self.speed)
-        result = subprocess.run(
-            ["espeak-ng", "-s", str(rate), text],
-            capture_output=True,
-        )
-        return result.returncode == 0
+        if self.audio_device:
+            # Pipe through aplay to reach the correct ALSA device
+            espeak = subprocess.Popen(
+                ["espeak-ng", "-s", str(rate), "--stdout", text],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            aplay = subprocess.Popen(
+                ["aplay", "-D", self.audio_device],
+                stdin=espeak.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            espeak.stdout.close()
+            aplay.communicate()
+            return aplay.returncode == 0
+        else:
+            result = subprocess.run(
+                ["espeak-ng", "-s", str(rate), text],
+                capture_output=True,
+            )
+            return result.returncode == 0
 
     def speak_async(self, text: str) -> None:
         """Speak text without blocking."""
@@ -328,7 +358,11 @@ class TextToSpeech:
 
             for player in ["afplay", "aplay", "paplay", "play"]:
                 try:
-                    subprocess.run([player, temp_path], capture_output=True, check=True)
+                    cmd = [player]
+                    if player == "aplay" and self.audio_device:
+                        cmd += ["-D", self.audio_device]
+                    cmd.append(temp_path)
+                    subprocess.run(cmd, capture_output=True, check=True)
                     break
                 except (FileNotFoundError, subprocess.CalledProcessError):
                     continue

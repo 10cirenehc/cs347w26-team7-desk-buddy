@@ -259,6 +259,7 @@ class DeskBuddyApp:
                 voice=tts_config.get('voice', 'en_US-lessac-medium'),
                 speed=tts_config.get('speed', 1.0),
                 audio_manager=self.audio_manager,
+                audio_device=tts_config.get('audio_device'),
             )
 
             logger.info("Voice I/O ready")

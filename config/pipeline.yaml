@@ -64,6 +64,7 @@ voice:
   tts:
     voice: "en_US-lessac-medium"
     speed: 1.0
+    audio_device: "plughw:2,0"  # ALSA device for Jetson (null = system default)
 
 # LLM Agent configuration
 agent:
