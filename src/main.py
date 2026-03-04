@@ -9,11 +9,15 @@ Unified entry point that combines:
 - LLM agent for query processing
 - Focus session management
 - Adaptive alerts with desk control
+- LCD touchscreen display (posture/focus status, hydration, timers)
+- Hydration tracking (manual logging, voice queries)
+- Event bus for component communication
 
 Usage:
     python -m src.main
     python -m src.main --no-voice  # Without voice features
     python -m src.main --no-desk   # Without desk control
+    python -m src.main --no-lcd    # Without LCD touchscreen
 """
 
 import argparse
@@ -58,6 +62,7 @@ class DeskBuddyApp:
         enable_voice: bool = True,
         enable_desk: bool = True,
         enable_display: bool = True,
+        enable_lcd: bool = True,
         demo_mode: bool = False,
     ):
         """
@@ -68,12 +73,14 @@ class DeskBuddyApp:
             enable_voice: Enable voice I/O
             enable_desk: Enable desk control
             enable_display: Show video display
+            enable_lcd: Enable LCD touchscreen
             demo_mode: Use shortened alert thresholds for demo/presentation
         """
         self.config_path = config_path
         self.enable_voice = enable_voice
         self.enable_desk = enable_desk
         self.enable_display = enable_display
+        self.enable_lcd = enable_lcd
         self.demo_mode = demo_mode
 
         self.config = load_config(config_path)
@@ -107,6 +114,11 @@ class DeskBuddyApp:
         self.agent = None
         self.session = None
         self.alerts = None
+
+        # New components
+        self.event_bus = None
+        self.lcd = None
+        self.hydration = None
 
     async def setup(self) -> bool:
         """
@@ -206,6 +218,10 @@ class DeskBuddyApp:
                 output_dir=state_logger_config.get('output_dir', 'data/state_logs'),
             )
 
+            # ----- Event Bus -----
+            from .events import EventBus
+            self.event_bus = EventBus()
+
             # ----- Voice I/O -----
             if self.enable_voice:
                 logger.info("Setting up voice I/O...")
@@ -215,6 +231,15 @@ class DeskBuddyApp:
             if self.enable_desk:
                 logger.info("Setting up desk control...")
                 await self._setup_desk()
+
+            # ----- LCD -----
+            if self.enable_lcd:
+                logger.info("Setting up LCD...")
+                self._setup_lcd()
+
+            # ----- Hydration Tracker -----
+            logger.info("Setting up hydration tracker...")
+            self._setup_hydration()
 
             # ----- Agent -----
             logger.info("Setting up agent...")
@@ -297,6 +322,32 @@ class DeskBuddyApp:
             logger.warning(f"Desk setup failed: {e}")
             self.enable_desk = False
 
+    def _setup_lcd(self) -> None:
+        """Setup LCD display."""
+        try:
+            from .lcd import LCDController
+
+            lcd_config = self.config.get('lcd', {})
+            self.lcd = LCDController(event_bus=self.event_bus, config=lcd_config)
+            if not self.lcd.setup():
+                logger.info("LCD not available, continuing without display")
+                self.lcd = None
+                self.enable_lcd = False
+        except Exception as e:
+            logger.warning(f"LCD setup failed: {e}")
+            self.lcd = None
+            self.enable_lcd = False
+
+    def _setup_hydration(self) -> None:
+        """Setup hydration tracker."""
+        from .hydration import HydrationTracker
+
+        hydration_config = self.config.get('hydration', {})
+        self.hydration = HydrationTracker(
+            goal_ml=hydration_config.get('daily_goal_ml', 2000),
+            event_bus=self.event_bus,
+        )
+
     async def _setup_agent(self) -> None:
         """Setup LLM agent and related components."""
         from .agent import LLMClient, DeskBuddyAgent, FocusSessionManager, AlertEngine
@@ -312,7 +363,11 @@ class DeskBuddyApp:
 
         # Focus session manager
         history = self.state_logger.get_history()
-        self.session = FocusSessionManager(history=history, demo_mode=self.demo_mode)
+        self.session = FocusSessionManager(
+            history=history,
+            demo_mode=self.demo_mode,
+            event_bus=self.event_bus,
+        )
 
         # Main agent
         self.agent = DeskBuddyAgent(
@@ -320,6 +375,7 @@ class DeskBuddyApp:
             history=history,
             session=self.session,
             desk_callback=self._handle_desk_command if self.desk else None,
+            hydration=self.hydration,
         )
 
         # Alert engine
@@ -329,6 +385,7 @@ class DeskBuddyApp:
             tts=self.tts,
             enabled=alerts_config.get('enabled', True),
             demo_mode=self.demo_mode,
+            event_bus=self.event_bus,
         )
 
     async def _handle_desk_command(self, command: str) -> None:
@@ -597,6 +654,15 @@ class DeskBuddyApp:
                         history = self.state_logger.get_history()
                         await self.alerts.check_and_execute(history, self.session)
 
+                # ----- LCD -----
+                if self.enable_lcd and self.lcd:
+                    hydration_status = self.hydration.get_hydration_status() if self.hydration else {}
+                    timer_status = self._get_timer_status()
+                    self.lcd.update(posture, focus, hydration_status, timer_status)
+                    lcd_action = self.lcd.tick()
+                    if lcd_action:
+                        await self._handle_lcd_action(lcd_action)
+
                 # ----- Display -----
                 if self.enable_display:
                     display_frame = self._draw_overlay(
@@ -654,6 +720,44 @@ class DeskBuddyApp:
         pending = self.agent.get_pending_desk_action()
         if pending:
             await self._handle_desk_command(pending)
+
+    def _get_timer_status(self) -> Optional[dict]:
+        """Get timer status dict for LCD display."""
+        if not self.session:
+            return None
+        status = self.session.get_status()
+        if not status.get("active"):
+            return {"active": False}
+        remaining_min = status.get("remaining_min", 0)
+        return {
+            "active": True,
+            "phase": status.get("phase", "focus"),
+            "remaining_seconds": remaining_min * 60,
+            "target_seconds": status.get("target_min", 25) * 60,
+        }
+
+    async def _handle_lcd_action(self, action: dict) -> None:
+        """Dispatch LCD touch actions to appropriate components."""
+        action_type = action.get("action")
+
+        if action_type == "start_focus":
+            duration = action.get("duration_min", 25)
+            if self.session:
+                msg = self.session.start_focus(duration_min=duration)
+                if self.tts:
+                    self.tts.speak(msg)
+
+        elif action_type == "end_focus":
+            if self.session and self.session.is_active:
+                stats = self.session.end()
+                msg = f"Session ended. {stats.focus_ratio:.0%} focused, {stats.posture_good_ratio:.0%} good posture."
+                if self.tts:
+                    self.tts.speak(msg)
+
+        elif action_type == "set_water_goal":
+            goal = action.get("goal_ml", 2000)
+            if self.hydration:
+                self.hydration.set_goal(float(goal))
 
     def _draw_overlay(self, frame, posture, focus, presence,
                        phone_detected=False, features=None):
@@ -798,6 +902,10 @@ class DeskBuddyApp:
         if self.audio_manager:
             self.audio_manager.close()
 
+        # Shutdown LCD
+        if self.lcd:
+            self.lcd.shutdown()
+
         # Disconnect desk
         if self.desk:
             await self.desk.disconnect()
@@ -819,6 +927,7 @@ async def main():
     parser.add_argument("--no-voice", action="store_true", help="Disable voice features")
     parser.add_argument("--no-desk", action="store_true", help="Disable desk control")
     parser.add_argument("--no-display", action="store_true", help="Disable video display")
+    parser.add_argument("--no-lcd", action="store_true", help="Disable LCD touchscreen")
     parser.add_argument("--skip-calibration", action="store_true", help="Skip calibration (use saved)")
     parser.add_argument("--demo", action="store_true", help="Demo mode with shortened alert thresholds")
     args = parser.parse_args()
@@ -829,6 +938,7 @@ async def main():
         enable_voice=not args.no_voice,
         enable_desk=not args.no_desk,
         enable_display=not args.no_display,
+        enable_lcd=not args.no_lcd,
         demo_mode=args.demo,
     )
 

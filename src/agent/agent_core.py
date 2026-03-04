@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from ..perception.state_history import StateHistory
     from .llm_client import LLMClient
     from .focus_session import FocusSessionManager
+    from ..hydration import HydrationTracker
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,12 @@ class DeskBuddyAgent:
         (r"(?:am i|being).*(?:focus|distract)", "check_focus"),
         (r"focus.*(?:tip|advice|help)", "focus_advice"),
 
+        # Hydration
+        (r"(?:how much|how many).*(?:water|drank|drink|hydrat)", "check_hydration"),
+        (r"set.*(?:water|hydrat).*goal.*(\d+)", "set_water_goal"),
+        (r"(?:water|hydrat).*(?:status|progress)", "check_hydration"),
+        (r"(?:i\s+)?(?:drank|had|log).*?(\d+).*(?:m[lL]|water|millil)", "log_water"),
+
         # Desk commands
         (r"(?:stand|standing).*(?:up|desk)", "desk_stand"),
         (r"(?:sit|sitting).*(?:down|desk)", "desk_sit"),
@@ -103,6 +110,7 @@ class DeskBuddyAgent:
         history: 'StateHistory',
         session: Optional['FocusSessionManager'] = None,
         desk_callback: Optional[Callable] = None,
+        hydration: Optional['HydrationTracker'] = None,
     ):
         """
         Initialize agent.
@@ -112,11 +120,13 @@ class DeskBuddyAgent:
             history: StateHistory for context
             session: FocusSessionManager (optional)
             desk_callback: Callback for desk commands (async)
+            hydration: HydrationTracker for water intake queries
         """
         self.llm = llm
         self.history = history
         self.session = session
         self.desk_callback = desk_callback
+        self.hydration = hydration
 
         # Pending desk action set by intent handlers, consumed by main loop
         self._pending_desk_action: Optional[str] = None
@@ -403,6 +413,35 @@ class DeskBuddyAgent:
             self._pending_desk_action = "sit"
             return "Moving desk to sitting position."
         return "Desk control isn't connected right now."
+
+    def _intent_check_hydration(self, params: Dict, query: str) -> str:
+        """Check hydration status."""
+        if not self.hydration:
+            return "Hydration tracking isn't set up right now."
+        status = self.hydration.get_hydration_status()
+        intake = status["intake_ml"]
+        goal = status["goal_ml"]
+        percent = status["percent"]
+        if intake == 0:
+            return f"You haven't logged any water yet. Your goal is {int(goal)} mL."
+        return f"You've had {int(intake)} of {int(goal)} mL today, that's {percent:.0f}% of your goal."
+
+    def _intent_set_water_goal(self, params: Dict, query: str) -> str:
+        """Set water goal."""
+        if not self.hydration:
+            return "Hydration tracking isn't set up right now."
+        goal = params.get("number_0", 2000)
+        self.hydration.set_goal(float(goal))
+        return f"Water goal set to {goal} mL."
+
+    def _intent_log_water(self, params: Dict, query: str) -> str:
+        """Log water intake manually."""
+        if not self.hydration:
+            return "Hydration tracking isn't set up right now."
+        amount = params.get("number_0", 250)
+        self.hydration.add_intake(float(amount))
+        status = self.hydration.get_hydration_status()
+        return f"Logged {amount} mL. Total today: {int(status['intake_ml'])} of {int(status['goal_ml'])} mL ({status['percent']:.0f}%)."
 
     def get_pending_desk_action(self) -> Optional[str]:
         """Return and clear any pending desk action."""

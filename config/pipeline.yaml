@@ -80,6 +80,18 @@ alerts:
   distraction_threshold_seconds: 300
   positive_reinforcement: true
 
+# LCD touchscreen configuration
+lcd:
+  enabled: true
+  render_rate_hz: 5
+  touch_debounce_ms: 250
+  wallpaper_dir: "data/wallpapers"
+
+# Hydration tracker configuration
+hydration:
+  daily_goal_ml: 2000
+  reminder_frequency_seconds: 1800
+
 # Desk control configuration
 desk:
   enabled: true

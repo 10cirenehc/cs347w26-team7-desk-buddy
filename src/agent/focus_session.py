@@ -12,6 +12,7 @@ from typing import Optional, List, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..perception.state_history import StateHistory
+    from ..events import EventBus
 
 logger = logging.getLogger(__name__)
 
@@ -81,16 +82,19 @@ class FocusSessionManager:
     # Posture warning threshold
     POSTURE_WARNING_THRESHOLD = 0.3    # Warn if < 30% good posture
 
-    def __init__(self, history: Optional['StateHistory'] = None, demo_mode: bool = False):
+    def __init__(self, history: Optional['StateHistory'] = None, demo_mode: bool = False,
+                 event_bus: Optional['EventBus'] = None):
         """
         Initialize focus session manager.
 
         Args:
             history: StateHistory for querying focus/posture state
             demo_mode: Use shortened thresholds for demo/presentation
+            event_bus: EventBus for emitting session events
         """
         self.history = history
         self.demo_mode = demo_mode
+        self.event_bus = event_bus
 
         self.phase = SessionPhase.IDLE
         self.start_time: Optional[float] = None
@@ -109,6 +113,15 @@ class FocusSessionManager:
             self.EARLY_BREAK_MIN_ELAPSED_MIN = 0.25   # 15 seconds
             self.EARLY_BREAK_CHECK_WINDOW_MIN = 0.25   # 15 seconds
 
+    def _emit(self, event_type_name: str, data: dict = None) -> None:
+        """Emit an event on the bus if available."""
+        if not self.event_bus:
+            return
+        from ..events import Event, EventType
+        etype = getattr(EventType, event_type_name, None)
+        if etype:
+            self.event_bus.emit(Event(type=etype, data=data or {}))
+
     def start_focus(self, duration_min: int = DEFAULT_FOCUS_DURATION_MIN) -> str:
         """
         Start a focus session.
@@ -126,8 +139,10 @@ class FocusSessionManager:
         self._posture_warned = False
         self._distraction_events = []
 
+        msg = f"Starting {duration_min}-minute focus session. I'll track your focus and posture."
         logger.info(f"Started {duration_min}-minute focus session")
-        return f"Starting {duration_min}-minute focus session. I'll track your focus and posture."
+        self._emit("FOCUS_STARTED", {"duration_min": duration_min, "message": msg})
+        return msg
 
     def start_break(self, duration_min: Optional[int] = None) -> str:
         """
@@ -151,8 +166,10 @@ class FocusSessionManager:
         self.target_duration_min = duration_min
         self.stats.breaks_taken += 1
 
+        msg = f"Break time! Take {duration_min} minutes to rest your eyes and stretch."
         logger.info(f"Started {duration_min}-minute break")
-        return f"Break time! Take {duration_min} minutes to rest your eyes and stretch."
+        self._emit("BREAK_STARTED", {"duration_min": duration_min, "message": msg})
+        return msg
 
     def end(self) -> SessionStats:
         """
@@ -192,12 +209,19 @@ class FocusSessionManager:
         elapsed = now - self.start_time
         elapsed_min = elapsed / 60
 
+        suggestion = None
         if self.phase == SessionPhase.FOCUS:
-            return self._check_focus_session(elapsed_min, now)
+            suggestion = self._check_focus_session(elapsed_min, now)
         elif self.phase == SessionPhase.BREAK:
-            return self._check_break(elapsed_min)
+            suggestion = self._check_break(elapsed_min)
 
-        return None
+        if suggestion and suggestion.suggestion_type != "session_complete":
+            self._emit("FOCUS_SUGGESTION", {
+                "message": suggestion.message,
+                "suggestion_type": suggestion.suggestion_type,
+            })
+
+        return suggestion
 
     def _check_focus_session(self, elapsed_min: float, now: float) -> Optional[SessionSuggestion]:
         """Check focus session and generate suggestions."""
@@ -298,8 +322,15 @@ class FocusSessionManager:
 
         summary_parts.append("Ready for a break?")
 
+        msg = " ".join(summary_parts)
+        self._emit("FOCUS_COMPLETED", {
+            "message": msg,
+            "focus_ratio": self.stats.focus_ratio,
+            "posture_good_ratio": self.stats.posture_good_ratio,
+        })
+
         return SessionSuggestion(
-            message=" ".join(summary_parts),
+            message=msg,
             suggestion_type="session_complete",
             priority=3,
         )

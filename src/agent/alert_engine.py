@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from ..desk.desk_client import DeskClient
     from ..voice.text_to_speech import TextToSpeech
     from .focus_session import FocusSessionManager
+    from ..events import EventBus
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,7 @@ class AlertEngine:
         tts: Optional['TextToSpeech'] = None,
         enabled: bool = True,
         demo_mode: bool = False,
+        event_bus: Optional['EventBus'] = None,
     ):
         """
         Initialize alert engine.
@@ -96,11 +98,13 @@ class AlertEngine:
             tts: TextToSpeech for voice alerts
             enabled: Whether alerts are enabled
             demo_mode: Use shortened thresholds for demo/presentation
+            event_bus: EventBus for emitting alert events
         """
         self.desk = desk_client
         self.tts = tts
         self.enabled = enabled
         self.demo_mode = demo_mode
+        self.event_bus = event_bus
 
         self._rules: List[AlertRule] = []
         self._last_triggered: Dict[str, float] = {}
@@ -303,6 +307,18 @@ class AlertEngine:
         # Trim history
         if len(self._alert_history) > self._max_history:
             self._alert_history = self._alert_history[-self._max_history:]
+
+        # Emit event for LCD and other subscribers
+        if self.event_bus:
+            from ..events import Event, EventType
+            self.event_bus.emit(Event(
+                type=EventType.ALERT_TRIGGERED,
+                data={
+                    "rule_name": rule.name,
+                    "message": message,
+                    "priority": rule.priority.value,
+                },
+            ))
 
         logger.info(f"Alert triggered: {rule.name} - {message}")
         return alert
