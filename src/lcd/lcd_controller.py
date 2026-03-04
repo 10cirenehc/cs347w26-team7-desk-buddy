@@ -96,6 +96,9 @@ class LCDController:
         # Water goal edit state
         self._edit_goal_ml = 2000.0
 
+        # Mute state
+        self._muted = False
+
         # Cached state from main loop (written by update(), read by render thread)
         self._posture_state = "unknown"
         self._focus_state = "unknown"
@@ -209,7 +212,8 @@ class LCDController:
 
     # ── Main-thread API ──
 
-    def update(self, posture, focus, hydration_status: Dict, timer_status: Optional[Dict]) -> None:
+    def update(self, posture, focus, hydration_status: Dict, timer_status: Optional[Dict],
+               muted: bool = False) -> None:
         """
         Push latest state from the main loop (thread-safe).
 
@@ -218,12 +222,14 @@ class LCDController:
             focus: FocusState object or None
             hydration_status: dict from HydrationTracker.get_hydration_status()
             timer_status: dict from FocusSessionManager.get_status() or None
+            muted: Whether alerts are muted
         """
         with self._lock:
             self._posture_state = posture.state.value if posture else "unknown"
             self._focus_state = focus.state.value if focus else "unknown"
             self._hydration_status = hydration_status
             self._timer_status = timer_status
+            self._muted = muted
 
     def poll_action(self) -> Optional[Dict[str, Any]]:
         """
@@ -306,6 +312,8 @@ class LCDController:
             self._state = LCDState.HYDRATION_DETAIL
         elif self._hits.get("timer") and touch_in(tx, ty, *self._hits["timer"]):
             self._state = LCDState.TIMER_SETUP
+        elif self._hits.get("mute") and touch_in(tx, ty, *self._hits["mute"]):
+            return {"action": "toggle_mute"}
         elif self._hits.get("notif") and self._hits["notif"] and touch_in(tx, ty, *self._hits["notif"]):
             if self._notif_queue:
                 self._current_notif = self._notif_queue.pop(0)
@@ -426,6 +434,7 @@ class LCDController:
                 timer_status=self._timer_status,
                 wallpaper_img=self._wallpaper_img,
                 notif_pending=bool(self._notif_queue),
+                muted=self._muted,
             )
 
         elif self._state == LCDState.NOTIFICATION:

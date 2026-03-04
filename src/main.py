@@ -123,6 +123,9 @@ class DeskBuddyApp:
         # Voice processing flag (prevents concurrent voice commands)
         self._voice_processing = False
 
+        # Mute state (suppresses TTS alerts, not voice responses to commands)
+        self._muted = False
+
     async def setup(self) -> bool:
         """
         Initialize all components.
@@ -381,6 +384,7 @@ class DeskBuddyApp:
             session=self.session,
             desk_callback=self._handle_desk_command if self.desk else None,
             hydration=self.hydration,
+            alert_mute_callback=lambda m: self._set_mute(m),
         )
 
         # Alert engine
@@ -402,6 +406,17 @@ class DeskBuddyApp:
             await self.desk.stand()
         elif command == "sit":
             await self.desk.sit()
+
+    def _set_mute(self, muted: bool) -> None:
+        """Set mute state and propagate to alert engine."""
+        self._muted = muted
+        if self.alerts:
+            self.alerts.set_muted(muted)
+        logger.info(f"Mute {'enabled' if muted else 'disabled'}")
+
+    def _toggle_mute(self) -> None:
+        """Toggle mute state."""
+        self._set_mute(not self._muted)
 
     async def run_calibration(self) -> bool:
         """
@@ -664,7 +679,7 @@ class DeskBuddyApp:
                 if self.enable_lcd and self.lcd:
                     hydration_status = self.hydration.get_hydration_status() if self.hydration else {}
                     timer_status = self._get_timer_status()
-                    self.lcd.update(posture, focus, hydration_status, timer_status)
+                    self.lcd.update(posture, focus, hydration_status, timer_status, muted=self._muted)
                     lcd_action = self.lcd.poll_action()
                     if lcd_action:
                         await self._handle_lcd_action(lcd_action)
@@ -773,6 +788,9 @@ class DeskBuddyApp:
                 msg = f"Session ended. {stats.focus_ratio:.0%} focused, {stats.posture_good_ratio:.0%} good posture."
                 if self.tts:
                     self.tts.speak(msg)
+
+        elif action_type == "toggle_mute":
+            self._toggle_mute()
 
         elif action_type == "set_water_goal":
             goal = action.get("goal_ml", 2000)

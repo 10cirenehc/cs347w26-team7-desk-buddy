@@ -41,6 +41,7 @@ def render_home(
     timer_status: Optional[Dict[str, Any]],
     wallpaper_img: Optional[Image.Image],
     notif_pending: bool,
+    muted: bool = False,
 ) -> Tuple[Image.Image, Dict]:
     """
     Render the home dashboard screen.
@@ -105,33 +106,40 @@ def render_home(
         d.text((10, y_timer), f"Timer: {m:02d}:{s:02d} remaining ({phase})",
                font=FONT_SMALL, fill=timer_color)
 
-    # ── Bottom nav buttons ──
-    ICON_W, ICON_H = 70, 38
+    # ── Muted badge ──
+    if muted:
+        d.text((WIDTH - 62, 24), "MUTED", font=FONT_SMALL, fill=C_ACCENT2)
+
+    # ── Bottom nav buttons (4 buttons) ──
+    ICON_W, ICON_H = 55, 38
     btn_y0 = HEIGHT - ICON_H - 4
     btn_y1 = HEIGHT - 4
+    gap = (WIDTH - 8 - 4 * ICON_W) // 3  # spacing between buttons
+    btn_xs = [4 + i * (ICON_W + gap) for i in range(4)]
 
-    # Wallpaper button (bottom-left)
-    rounded_rect(d, 4, btn_y0, 4 + ICON_W, btn_y1, fill=C_PANEL, outline=C_ACCENT)
-    centered_text(d, 4 + ICON_W // 2, (btn_y0 + btn_y1) // 2, "Wall", FONT_SMALL, fill=C_ACCENT)
+    # Wallpaper
+    rounded_rect(d, btn_xs[0], btn_y0, btn_xs[0] + ICON_W, btn_y1, fill=C_PANEL, outline=C_ACCENT)
+    centered_text(d, btn_xs[0] + ICON_W // 2, (btn_y0 + btn_y1) // 2, "Wall", FONT_SMALL, fill=C_ACCENT)
 
-    # Water button (bottom-center)
-    water_x0 = WIDTH // 2 - ICON_W // 2
-    water_x1 = WIDTH // 2 + ICON_W // 2
-    rounded_rect(d, water_x0, btn_y0, water_x1, btn_y1, fill=C_PANEL, outline=C_OK)
-    centered_text(d, WIDTH // 2, (btn_y0 + btn_y1) // 2, "Water", FONT_SMALL, fill=C_OK)
+    # Water
+    rounded_rect(d, btn_xs[1], btn_y0, btn_xs[1] + ICON_W, btn_y1, fill=C_PANEL, outline=C_OK)
+    centered_text(d, btn_xs[1] + ICON_W // 2, (btn_y0 + btn_y1) // 2, "Water", FONT_SMALL, fill=C_OK)
 
-    # Timer button (bottom-right)
-    timer_x0 = WIDTH - ICON_W - 4
-    timer_x1 = WIDTH - 4
-    rounded_rect(d, timer_x0, btn_y0, timer_x1, btn_y1, fill=C_PANEL, outline=C_ACCENT2)
-    centered_text(d, (timer_x0 + timer_x1) // 2, (btn_y0 + btn_y1) // 2,
-                  "Timer", FONT_SMALL, fill=C_ACCENT2)
+    # Timer
+    rounded_rect(d, btn_xs[2], btn_y0, btn_xs[2] + ICON_W, btn_y1, fill=C_PANEL, outline=C_ACCENT2)
+    centered_text(d, btn_xs[2] + ICON_W // 2, (btn_y0 + btn_y1) // 2, "Timer", FONT_SMALL, fill=C_ACCENT2)
 
-    # Notification badge (top-left corner, above posture icon area)
+    # Mute/Unmute
+    mute_label = "Unmute" if muted else "Mute"
+    mute_outline = C_ACCENT2 if muted else C_WARN
+    rounded_rect(d, btn_xs[3], btn_y0, btn_xs[3] + ICON_W, btn_y1, fill=C_PANEL, outline=mute_outline)
+    centered_text(d, btn_xs[3] + ICON_W // 2, (btn_y0 + btn_y1) // 2, mute_label, FONT_SMALL, fill=mute_outline)
+
     hits = {
-        "wallpaper": (4, btn_y0, 4 + ICON_W, btn_y1),
-        "water": (water_x0, btn_y0, water_x1, btn_y1),
-        "timer": (timer_x0, btn_y0, timer_x1, btn_y1),
+        "wallpaper": (btn_xs[0], btn_y0, btn_xs[0] + ICON_W, btn_y1),
+        "water": (btn_xs[1], btn_y0, btn_xs[1] + ICON_W, btn_y1),
+        "timer": (btn_xs[2], btn_y0, btn_xs[2] + ICON_W, btn_y1),
+        "mute": (btn_xs[3], btn_y0, btn_xs[3] + ICON_W, btn_y1),
         "notif": None,
     }
 
@@ -149,22 +157,28 @@ def render_notification(message: str, detail: str = "") -> Tuple[Image.Image, Di
     """Render an alert/notification screen with acknowledge button."""
     img, d = blank_canvas()
 
-    px, py = 20, 60
-    pw, ph = WIDTH - 40, HEIGHT - 120
+    px, py = 20, 44
+    pw, ph = WIDTH - 40, HEIGHT - 88
     rounded_rect(d, px, py, px + pw, py + ph, radius=14, fill=C_PANEL, outline=C_ACCENT2)
 
-    # Icon ring
-    d.ellipse([px + pw // 2 - 28, py + 10, px + pw // 2 + 28, py + 66],
+    # Icon ring (smaller)
+    d.ellipse([px + pw // 2 - 20, py + 8, px + pw // 2 + 20, py + 48],
               outline=C_ACCENT2, width=3)
-    centered_text(d, px + pw // 2, py + 38, "!", FONT_XLARGE, fill=C_ACCENT2)
+    centered_text(d, px + pw // 2, py + 28, "!", FONT_XLARGE, fill=C_ACCENT2)
 
-    # Word-wrap message
+    # Acknowledge button (positioned first so we know the text boundary)
+    bx0, by0 = WIDTH // 2 - 60, HEIGHT - 52
+    bx1, by1 = WIDTH // 2 + 60, HEIGHT - 12
+    rounded_rect(d, bx0, by0, bx1, by1, fill=C_OK)
+    centered_text(d, WIDTH // 2, (by0 + by1) // 2, "Acknowledge", FONT_MED, fill=(0, 0, 0))
+
+    # Word-wrap message using FONT_SMALL for more text
     words = message.split()
     lines, line = [], ""
     max_w = pw - 20
     for w in words:
         test = (line + " " + w).strip()
-        tw, _ = text_size(d, test, FONT_MED)
+        tw, _ = text_size(d, test, FONT_SMALL)
         if tw <= max_w:
             line = test
         else:
@@ -174,19 +188,20 @@ def render_notification(message: str, detail: str = "") -> Tuple[Image.Image, Di
     if line:
         lines.append(line)
 
-    ty = py + 80
-    for ln in lines:
-        centered_text(d, px + pw // 2, ty, ln, FONT_MED, fill=C_TEXT)
-        ty += 26
+    # Calculate max lines that fit before the ack button
+    ty = py + 64
+    line_height = 18
+    max_y = by0 - 6  # leave a small gap above the button
+    max_lines = max(1, (max_y - ty) // line_height)
 
-    if detail:
-        centered_text(d, px + pw // 2, ty + 10, detail, FONT_SMALL, fill=C_SUBTEXT)
+    for i, ln in enumerate(lines[:max_lines]):
+        if i == max_lines - 1 and len(lines) > max_lines:
+            ln = ln[:len(ln) - 3].rstrip() + "..." if len(ln) > 3 else "..."
+        centered_text(d, px + pw // 2, ty, ln, FONT_SMALL, fill=C_TEXT)
+        ty += line_height
 
-    # Acknowledge button
-    bx0, by0 = WIDTH // 2 - 60, HEIGHT - 52
-    bx1, by1 = WIDTH // 2 + 60, HEIGHT - 12
-    rounded_rect(d, bx0, by0, bx1, by1, fill=C_OK)
-    centered_text(d, WIDTH // 2, (by0 + by1) // 2, "Acknowledge", FONT_MED, fill=(0, 0, 0))
+    if detail and ty + 10 < max_y:
+        centered_text(d, px + pw // 2, ty + 6, detail, FONT_SMALL, fill=C_SUBTEXT)
 
     draw_realtime_clock(d)
     return img, {"ack": (bx0, by0, bx1, by1)}

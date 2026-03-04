@@ -110,6 +110,7 @@ class AlertEngine:
         self._last_triggered: Dict[str, float] = {}
         self._alert_history: List[TriggeredAlert] = []
         self._max_history = 100
+        self._muted = False
 
         # Build default rules
         self._build_default_rules()
@@ -205,6 +206,11 @@ class AlertEngine:
             priority=AlertPriority.MEDIUM,
             requires_focus_session=True,  # Only during focus sessions
         ))
+
+    def set_muted(self, muted: bool) -> None:
+        """Mute or unmute TTS alerts. Desk actions and events still fire."""
+        self._muted = muted
+        logger.info(f"Alert TTS {'muted' if muted else 'unmuted'}")
 
     def add_rule(self, rule: AlertRule) -> None:
         """Add a custom alert rule."""
@@ -360,10 +366,10 @@ class AlertEngine:
         return message
 
     async def _execute_action(self, action: AlertAction, message: str) -> None:
-        """Execute the specified action."""
+        """Execute the specified action. TTS is skipped when muted."""
         try:
             if action == AlertAction.VOICE:
-                if self.tts and message:
+                if self.tts and message and not self._muted:
                     self.tts.speak(message)
 
             elif action == AlertAction.DESK_STAND:
@@ -379,7 +385,7 @@ class AlertEngine:
                     await self.desk.nudge_up(500)
 
             elif action == AlertAction.VOICE_AND_DESK:
-                if self.tts and message:
+                if self.tts and message and not self._muted:
                     self.tts.speak(message)
                 if self.desk:
                     await self.desk.stand()

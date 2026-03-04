@@ -98,6 +98,11 @@ class DeskBuddyAgent:
         (r"(?:stand|standing).*(?:up|desk)", "desk_stand"),
         (r"(?:sit|sitting).*(?:down|desk)", "desk_sit"),
 
+        # Mute/unmute alerts
+        (r"(?:^|\s)unmute\b", "unmute"),
+        (r"(?:^|\s)mute\b", "mute"),
+        (r"(?:^|\s)(?:silence|quiet|shut\s*up|be\s*quiet)", "mute"),
+
         # General
         (r"^(?:hi|hello|hey)(?:\s|$)", "greeting"),
         (r"(?:thank|thanks)", "thanks"),
@@ -111,6 +116,7 @@ class DeskBuddyAgent:
         session: Optional['FocusSessionManager'] = None,
         desk_callback: Optional[Callable] = None,
         hydration: Optional['HydrationTracker'] = None,
+        alert_mute_callback: Optional[Callable] = None,
     ):
         """
         Initialize agent.
@@ -121,12 +127,14 @@ class DeskBuddyAgent:
             session: FocusSessionManager (optional)
             desk_callback: Callback for desk commands (async)
             hydration: HydrationTracker for water intake queries
+            alert_mute_callback: Callback to mute/unmute alerts (bool -> None)
         """
         self.llm = llm
         self.history = history
         self.session = session
         self.desk_callback = desk_callback
         self.hydration = hydration
+        self.alert_mute_callback = alert_mute_callback
 
         # Pending desk action set by intent handlers, consumed by main loop
         self._pending_desk_action: Optional[str] = None
@@ -448,6 +456,18 @@ class DeskBuddyAgent:
         action = self._pending_desk_action
         self._pending_desk_action = None
         return action
+
+    def _intent_mute(self, params: Dict, query: str) -> str:
+        """Mute automatic alerts."""
+        if self.alert_mute_callback:
+            self.alert_mute_callback(True)
+        return "Alerts muted."
+
+    def _intent_unmute(self, params: Dict, query: str) -> str:
+        """Unmute automatic alerts."""
+        if self.alert_mute_callback:
+            self.alert_mute_callback(False)
+        return "Alerts unmuted."
 
     def _intent_greeting(self, params: Dict, query: str) -> str:
         """Respond to greeting."""
