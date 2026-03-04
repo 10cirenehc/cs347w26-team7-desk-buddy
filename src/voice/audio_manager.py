@@ -132,6 +132,47 @@ class AudioManager:
 
         return devices
 
+    def find_device_index_by_alsa(self, alsa_device: str, input: bool = True) -> Optional[int]:
+        """
+        Find PyAudio device index matching an ALSA device name.
+
+        Parses the card number from an ALSA device string (e.g. "plughw:3,0" or "hw:3,0")
+        and scans PyAudio devices for a matching name containing that card number.
+
+        Args:
+            alsa_device: ALSA device string like "plughw:3,0" or "hw:3,0"
+            input: If True, match input devices; if False, match output devices
+
+        Returns:
+            PyAudio device index, or None if not found
+        """
+        import re
+
+        # Extract card number from ALSA string (e.g. "plughw:3,0" -> "3")
+        match = re.search(r'(?:plug)?hw:(\d+)', alsa_device)
+        if not match:
+            logger.warning(f"Could not parse card number from ALSA device: {alsa_device}")
+            return None
+
+        card_num = match.group(1)
+
+        devices = self.list_devices()
+        for dev in devices:
+            # Filter by direction
+            if input and dev.max_input_channels == 0:
+                continue
+            if not input and dev.max_output_channels == 0:
+                continue
+
+            # Match on card number in device name (e.g. "card 3" or "hw:3,")
+            name_lower = dev.name.lower()
+            if f"card {card_num}" in name_lower or f"hw:{card_num}," in name_lower:
+                logger.info(f"Matched ALSA device '{alsa_device}' to PyAudio device {dev.index}: {dev.name}")
+                return dev.index
+
+        logger.warning(f"No PyAudio device found matching ALSA device '{alsa_device}'")
+        return None
+
     def list_input_devices(self) -> List[AudioDevice]:
         """List available input (microphone) devices."""
         return [d for d in self.list_devices() if d.max_input_channels > 0]

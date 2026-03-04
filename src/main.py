@@ -233,11 +233,22 @@ class DeskBuddyApp:
         """Setup voice I/O components."""
         try:
             from .voice import AudioManager, WakeWordDetector, SpeechToText, TextToSpeech
+            from .voice.audio_manager import AudioConfig
 
             voice_config = self.config.get('voice', {})
 
-            # Audio manager
-            self.audio_manager = AudioManager()
+            # Audio manager — resolve ALSA input device if configured
+            audio_cfg = AudioConfig()
+            self.audio_manager = AudioManager(config=audio_cfg)
+
+            input_alsa = voice_config.get('audio_input_device')
+            if input_alsa:
+                idx = self.audio_manager.find_device_index_by_alsa(input_alsa, input=True)
+                if idx is not None:
+                    audio_cfg.input_device = idx
+                    logger.info(f"Using ALSA input device '{input_alsa}' -> PyAudio index {idx}")
+                else:
+                    logger.warning(f"Could not resolve ALSA input device '{input_alsa}', using default")
 
             # Wake word detector
             wake_config = voice_config.get('wake_word', {})

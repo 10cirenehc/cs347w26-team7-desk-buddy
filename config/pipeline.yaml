@@ -55,6 +55,7 @@ state_logger:
 
 # Voice I/O configuration
 voice:
+  audio_input_device: "plughw:3,0"   # ALSA mic (card 3, device 0) — null = system default
   wake_word:
     phrase: "hey_mycroft"  # Available: hey_jarvis, alexa, hey_mycroft, ok_google
     sensitivity: 0.5
