@@ -76,7 +76,7 @@ class TextToSpeech:
     }
 
     # Ordered fallback chain for runtime TTS attempts
-    _SPEAK_CHAIN = ["piper_python", "piper_cli", "espeak", "say"]
+    _SPEAK_CHAIN = ["espeak", "piper_python", "piper_cli", "say"]
 
     def __init__(
         self,
@@ -102,10 +102,22 @@ class TextToSpeech:
     def _init_backend(self) -> None:
         """Detect and initialize the best available TTS backend."""
 
-        # 1. Try Piper Python API
+        # 1. Try espeak-ng first (fast, reliable on Linux/Jetson)
+        try:
+            result = subprocess.run(
+                ["espeak-ng", "--version"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0:
+                self._backend = "espeak"
+                logger.info("TTS backend: espeak-ng")
+                return
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+
+        # 2. Try Piper Python API
         try:
             import piper
-            # Try to load voice — will fail fast if model not found
             self._voice_path = self._find_voice_model()
             if self._voice_path:
                 self._backend = "piper_python"
@@ -116,7 +128,7 @@ class TextToSpeech:
         except ImportError:
             pass
 
-        # 2. Try Piper CLI
+        # 3. Try Piper CLI
         try:
             result = subprocess.run(
                 ["piper", "--version"],
@@ -130,19 +142,6 @@ class TextToSpeech:
                     return
                 else:
                     logger.warning("Piper CLI available but voice model not found")
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            pass
-
-        # 3. Try espeak-ng (common Linux fallback)
-        try:
-            result = subprocess.run(
-                ["espeak-ng", "--version"],
-                capture_output=True, text=True, timeout=5,
-            )
-            if result.returncode == 0:
-                self._backend = "espeak"
-                logger.info("TTS backend: espeak-ng")
-                return
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
 
