@@ -1,23 +1,29 @@
-## Smart Coaster Feature
-## Cup Class `cup.py`
-### Attributes
-These are passed into the __init__:
-- name
-- cup weight
-- full cup weight
-### Getter Functions
-get_cup_weight(): returns weight of solely the cup
-get_total_water(): returns
+# Smart Coaster
 
-get_percent_water(current_weight):
-            curr_water_w = curr_w - self.__weight
-            return (curr_water_w / self.__full_water)
+# Software/API
 
-## Pin Connections (HX711 -> Jetson)
-I have physically connected VDD and VCC on the HX711 board.
-- VDD -> 3.3V
-- VCC -> 17 (3.3V)
-- CLK -> 31 (Input)
-- Data -> 29 (Output)
+## File Descriptions
 
-TO DO: Save most recently used cup in CSV file. In the future, can implement multiple cups but for MVP, only use most recently used?
+`coaster.py`: Smart Coaster System
+
+`calibration.json`: Stores the calibration settings for the load cell scale.
+
+`coaster_profiles.json`: Stores the profiles for Profile Mode.
+
+`hx711.py`: Driver for the HX711 amplifier used with the load cell.
+
+`calibrate.py`: Most simple program to get a read from the load cell. Used for testing components, not for the Smart Coaster.
+
+# Hardware
+
+## Components
+- 10kg Load Cell
+- SparkFun HX711 Load Cell Amplifier
+- Jetson AGX Orin
+
+## Pin Connections (HX711 -> Jetson AGX Orin)
+I already soldered VCC and VDD together on the HX711 board, so only one of them needs to be connected (saves a pin on the Jetson).
+- VCC or VDD -> 17 (3.3V)
+- GND -> 39
+- CLK (Blue) -> 31 (Input)
+- Data (Purple) -> 29 (Output)
