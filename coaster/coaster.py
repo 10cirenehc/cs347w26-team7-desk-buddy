@@ -20,7 +20,7 @@ PROFILE_FILE = "coaster_profiles.json"
 CALIBRATION_FILE = "calibration.json"
 REMINDER_FREQ_SECONDS = (30 * 60) # every 30 minutes
 SIP_THRESHOLD_GRAMS = 10 # min for what counts as a sip
-EMPTY_CUP_GRAMS = 5 # empty cup or no cup on coaster
+EMPTY_CUP_GRAMS = 50 # empty cup or no cup on coaster
 NUM_SAMPLES = 1000
 
 #
@@ -152,6 +152,9 @@ class SmartCoaster:
             return False # else
       
       def process_sip(self, weight: float) -> Optional[float]:
+            if weight < EMPTY_CUP_GRAMS: # no cup at all -> no sip to process
+                  self.last_weight = 0.0
+                  return None
             tare = self.cup.cup_weight_grams if self.cup else 0.0
             prev_water_wgt = max(0.0, self.last_weight - tare)
             curr_water_wgt = max(0.0, weight - tare)
