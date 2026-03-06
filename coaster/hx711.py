@@ -19,6 +19,7 @@ class HX711:
 
             self.set_gain(gain)
             self.reset()
+            self.read() # dummy read
       
       def reset(self) -> None:
         # Power down then power back up
@@ -76,4 +77,4 @@ class HX711:
             total = 0
             for _ in range(samples):
                   total += self.read()
-                  return total / samples
+            return total / samples
