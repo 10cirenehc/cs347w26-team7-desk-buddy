@@ -21,7 +21,6 @@ CALIBRATION_FILE = "calibration.json"
 REMINDER_FREQ_SECONDS = (30 * 60) # every 30 minutes
 SIP_THRESHOLD_GRAMS = 10 # min for what counts as a sip
 EMPTY_CUP_GRAMS = 50 # empty cup or no cup on coaster
-EMPTY_CUP_TOLERANCE = 10
 NUM_SAMPLES = 1000
 
 #
@@ -153,20 +152,17 @@ class SmartCoaster:
             return False # else
       
       def process_sip(self, weight: float) -> Optional[float]:
-            tare = self.cup.cup_weight_grams if self.cup else EMPTY_CUP_GRAMS
-            pickup_threshold = tare if tare > 0 else EMPTY_CUP_GRAMS
-            if weight <= (pickup_threshold - EMPTY_CUP_TOLERANCE):
-                  print("Pick up detected.")
-                  return None
+            tare = self.cup.cup_weight_grams if self.cup else 0.0
             prev_water_wgt = max(0.0, self.last_weight - tare)
             curr_water_wgt = max(0.0, weight - tare)
-            sip_amount = prev_water_wgt - curr_water_wgt
+            sip_amount = prev_water_wgt - curr_water_wgt # Should be positive if water was drank
+            # update weight in profile
             self.last_weight = weight
             if sip_amount >= SIP_THRESHOLD_GRAMS:
                   self.intake_ml += sip_amount
                   if self.profile:
                         self.profile.last_sip_time = datetime.now().isoformat()
-                  self.last_reminder = time.time()
+                  self.last_reminder = time.time() # update reminder timer in profile
                   return sip_amount
             return None
       
@@ -197,14 +193,14 @@ class SmartCoaster:
 def free_mode(cal: Calibration, load_cell: HX711):
       print("ENTERING FREE MODE\n")
       # Free mode does not care about cup weight
-      # Assumes cup is 50g for pickup purposes
-      cup = Cup(name="Unknown Cup", cup_weight_grams=0.0)
       print("Place your cup on the coaster.")
-      input("\tPress Enter when ready.")     
+      input("\tPress Enter when ready.")
+      current_weight = read_grams(cal, load_cell)
+      print(f"\tInitial weight recorded: {current_weight:.1f}g")
+      cup = Cup(name="Unknown Cup", cup_weight_grams=EMPTY_CUP_GRAMS)     
       coaster = SmartCoaster(profile=None)
       coaster.cup = cup
-      coaster.last_weight = read_grams(cal, load_cell)
-      print(f"\tInitial weight recorded: {coaster.last_weight:.1f}g")
+      coaster.last_weight = current_weight
 
       # Free Mode Main Loop
       print("Free mode running.")
@@ -242,17 +238,14 @@ def select_profile(profiles: Dict[str, Profile]) -> Profile:
             print(f"\tCreated new profile: {name}")
             return profile
 
-def select_cup(profile: Profile, cal: Calibration, load_cell: HX711) -> Cup:
+def select_cup(profile: Profile) -> Cup:
       if profile.recent_cup:
             print(f"Most recent cup: '{profile.recent_cup.name}' (tare: {profile.recent_cup.cup_weight_grams}g)")
             use_last = input("\tWould you like to use this cup again? [y/n]").strip().lower()
             if use_last != "n":
                   return profile.recent_cup
       name = input("Enter cup name: ").strip() or "Default Cup"
-      print("Place your empty cup on the coaster.")
-      input("Press enter to continue.")
-      tare = read_grams(cal, load_cell)
-      print(f"\tEmpty cup weight recorded: {tare:.1f}g")
+      tare = input("Enter cup tare weight in grams: ").strip()
       cup = Cup(name=name, cup_weight_grams=float(tare) if tare else 0.0)
       profile.recent_cup = cup # save for next time
       return cup
@@ -261,7 +254,7 @@ def select_cup(profile: Profile, cal: Calibration, load_cell: HX711) -> Cup:
 def profile_mode(profiles: Dict[str, Profile], cal: Calibration, load_cell: HX711):
       print("ENTERING PROFILE MODE\n")
       profile = select_profile(profiles)
-      cup = select_cup(profile, cal, load_cell)
+      cup = select_cup(profile)
 
       coaster = SmartCoaster(profile=profile)
       coaster.cup = cup
