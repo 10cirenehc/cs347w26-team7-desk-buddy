@@ -9,9 +9,9 @@ import time
 import json
 import Jetson.GPIO as GPIO
 from hx711 import HX711 # load cell library
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asDict
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict
 
 #
 # CONSTANTS
@@ -50,7 +50,7 @@ class Profile:
 #
 # PROFILES.JSON
 #
-def load_profile() -> dict[str, Profile]:
+def load_profile() -> Dict[str, Profile]:
       if not os.path.exists(PROFILE_FILE):
             return {}
       with open(PROFILE_FILE, "r") as file:
@@ -62,10 +62,10 @@ def load_profile() -> dict[str, Profile]:
             profiles[name] = Profile(**data, recent_cup=cup)
       return profiles
 
-def save_profile(profiles: dict[str, Profile]) -> None:
+def save_profile(profiles: Dict[str, Profile]) -> None:
       bulk_list = {}
       for name, profile in profiles.items():
-            entry = asdict(profile)
+            entry = asDict(profile)
             bulk_list[name] = entry
       with open(PROFILE_FILE, "w") as file:
             json.dump(bulk_list, file, indent = 2)
@@ -91,7 +91,7 @@ def load_calibration() -> Optional[Calibration]:
 
 def save_calibration(cal: Calibration) -> None:
       with open(CALIBRATION_FILE, "w") as file:
-            json.dump(asdict(cal), file, indent=2)
+            json.dump(asDict(cal), file, indent=2)
       print(f"{CALIBRATION_FILE} updated.")
 
 def calibrate(load_cell: HX711) -> bool:
@@ -219,7 +219,7 @@ def free_mode(cal: Calibration, load_cell: HX711):
 #
 # PROFILE MODE
 #
-def select_profile(profiles: dict[str, Profile]) -> Profile:
+def select_profile(profiles: Dict[str, Profile]) -> Profile:
       if profiles:
             print("\nExisting profiles:",",".join(profiles.keys()))
       name = input("Enter new or existing profile name: ").strip()
@@ -246,7 +246,7 @@ def select_cup(profile: Profile) -> Cup:
       return cup
 
 
-def profile_mode(profiles: dict[str, Profile], cal: Calibration, load_cell: HX711):
+def profile_mode(profiles: Dict[str, Profile], cal: Calibration, load_cell: HX711):
       print("ENTERING PROFILE MODE\n")
       profile = select_profile(profiles)
       cup = select_cup(profile)
