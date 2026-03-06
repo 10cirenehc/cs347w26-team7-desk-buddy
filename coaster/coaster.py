@@ -195,13 +195,15 @@ class SmartCoaster:
 #
 def free_mode(cal: Calibration, load_cell: HX711):
       print("ENTERING FREE MODE\n")
-      print("Place your empty cup on the coaster.")
+      # Free mode does not care about cup weight
+      print("Place your cup on the coaster.")
       input("\tPress Enter when ready.")
-      tare = read_grams(cal, load_cell)
-      print(f"\tCup tare recorded: {tare:.1f}g")
-      cup = Cup(name="Unknown Cup", cup_weight_grams=tare) if tare > 0 else None      
+      current_weight = read_grams(cal, load_cell)
+      print(f"\tInitial weight recorded: {current_weight:.1f}g")
+      cup = Cup(name="Unknown Cup", cup_weight_grams=EMPTY_CUP_GRAMS)     
       coaster = SmartCoaster(profile=None)
       coaster.cup = cup
+      coaster.last_weight = current_weight
 
       # Free Mode Main Loop
       print("Free mode running.")
@@ -257,6 +259,9 @@ def profile_mode(profiles: Dict[str, Profile], cal: Calibration, load_cell: HX71
 
       coaster = SmartCoaster(profile=profile)
       coaster.cup = cup
+      print("Place your cup with water on the coaster.")
+      input("\tPress Enter when ready.")
+      coaster.last_weight = read_grams(cal, load_cell)
 
       print("Profile mode running.")
       try:
