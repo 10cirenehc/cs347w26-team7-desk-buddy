@@ -152,9 +152,6 @@ class SmartCoaster:
             return False # else
       
       def process_sip(self, weight: float) -> Optional[float]:
-            if weight < EMPTY_CUP_GRAMS: # no cup at all -> no sip to process
-                  self.last_weight = 0.0
-                  return None
             tare = self.cup.cup_weight_grams if self.cup else 0.0
             prev_water_wgt = max(0.0, self.last_weight - tare)
             curr_water_wgt = max(0.0, weight - tare)
@@ -211,6 +208,8 @@ def free_mode(cal: Calibration, load_cell: HX711):
             cmd = input("[free mode] > ").strip().lower()
             if cmd == "q": # quit
                   break
+            elif cmd == "read":
+                  print(read_grams(cal, load_cell))
             else:
                   weight = read_grams(cal, load_cell) # load cell read
                   sipped = coaster.process_sip(weight)
@@ -269,6 +268,8 @@ def profile_mode(profiles: Dict[str, Profile], cal: Calibration, load_cell: HX71
                   cmd = input(f"[{profile.name}] > ").strip().lower()
                   if cmd == "q": # quit
                         break
+                  elif cmd == "read":
+                        print(read_grams(cal, load_cell))
                   else:
                         weight = read_grams(cal, load_cell)
                         sipped = coaster.process_sip(weight)
