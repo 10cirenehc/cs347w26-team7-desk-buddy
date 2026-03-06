@@ -30,6 +30,8 @@ class HX711:
 
       def is_ready(self) -> bool:
             # When DOUT goes low, data is ready for retrieval
+            if GPIO.input(self.__dout): # double check
+                  return False
             return (not GPIO.input(self.__dout))
       
       def set_gain(self, gain) -> None:
@@ -77,5 +79,7 @@ class HX711:
       def read_average(self, samples = 10):
             total = 0
             for _ in range(samples):
-                  total += self.read()
+                  val = self.read()
+                  if val != -1:
+                        total += val
             return total / samples
