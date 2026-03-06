@@ -47,6 +47,7 @@ class HX711:
             value = 0
             # Wait for data to be ready
             while not self.is_ready():
+                  print("Load cell is not ready!")
                   pass
 
             # Apply 25~27 positive clock pulses at PD_SCK
