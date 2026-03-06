@@ -1,7 +1,7 @@
 
 '''
 Smart Coaster v1.0
-March 04, 2026
+March 05, 2026
 '''
 
 import os
@@ -21,6 +21,7 @@ CALIBRATION_FILE = "calibration.json"
 REMINDER_FREQ_SECONDS = (30 * 60) # every 30 minutes
 SIP_THRESHOLD_GRAMS = 10 # min for what counts as a sip
 EMPTY_CUP_GRAMS = 5 # empty cup or no cup on coaster
+NUM_SAMPLES = 1000
 
 #
 # LOAD CELL CONFIG
@@ -101,7 +102,7 @@ def calibrate(load_cell: HX711) -> bool:
             print("ERROR:\tfailed to calibrate.")
             print("Exiting calibration.")
             return False
-      scale_zero = load_cell.read_average()
+      scale_zero = load_cell.read_average(NUM_SAMPLES)
       print("Scale zero has been updated.")
       ref_wgt_grams = input("Choose a reference object. Enter the object's weight in grams: ").strip()
       ref_wgt_grams = float(ref_wgt_grams)
@@ -110,7 +111,7 @@ def calibrate(load_cell: HX711) -> bool:
             print("ERROR:\tfailed to calibrate.")
             print("Exiting calibration.")
             return False
-      ref_wgt_analog = load_cell.read_average()
+      ref_wgt_analog = load_cell.read_average(NUM_SAMPLES)
       print(f"Reading {ref_wgt_grams}g = {ref_wgt_analog}")
       raw_per_gram = (ref_wgt_analog - scale_zero) / ref_wgt_grams
       cal = Calibration(
@@ -129,7 +130,7 @@ def calibrate(load_cell: HX711) -> bool:
 # LOAD CELL -> GRAMS
 #
 def read_grams(cal: Calibration, load_cell: HX711) -> float:
-      raw = load_cell.read_average()
+      raw = load_cell.read_average(NUM_SAMPLES)
       return ((raw-cal.raw_zero_value)/cal.scale_factor)
 
 #
