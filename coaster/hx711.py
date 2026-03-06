@@ -19,7 +19,6 @@ class HX711:
 
             self.set_gain(gain)
             self.reset()
-            self.read() # dummy read
       
       def reset(self) -> None:
         # Power down then power back up
@@ -30,8 +29,6 @@ class HX711:
 
       def is_ready(self) -> bool:
             # When DOUT goes low, data is ready for retrieval
-            if GPIO.input(self.__dout): # double check
-                  return False
             return (not GPIO.input(self.__dout))
       
       def set_gain(self, gain) -> None:
@@ -48,9 +45,11 @@ class HX711:
       def read(self):
             value = 0
             # Wait for data to be ready
+            timeout = time.time() + 5.0  # 5 second timeout
             while not self.is_ready():
-                  print("Load cell is not ready!")
-                  pass
+                  if time.time() > timeout:
+                        print("ERROR: HX711 timed out — check wiring.")
+                        return -1
 
             # Apply 25~27 positive clock pulses at PD_SCK
             # to shift out data from DOUT (24 bits total)
@@ -78,8 +77,10 @@ class HX711:
       # Average out the analog inputs to get a steady weight
       def read_average(self, samples = 10):
             total = 0
+            running_samples = samples
             for _ in range(samples):
                   val = self.read()
                   if val != -1:
                         total += val
+                        running_samples -= 1
             return total / samples
