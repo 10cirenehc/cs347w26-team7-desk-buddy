@@ -9,7 +9,7 @@ import time
 import json
 import Jetson.GPIO as GPIO
 from hx711 import HX711 # load cell library
-from dataclasses import dataclass, asDict
+from dataclasses import dataclass, asdict
 from datetime import datetime
 from typing import Optional, Dict
 
@@ -65,7 +65,7 @@ def load_profile() -> Dict[str, Profile]:
 def save_profile(profiles: Dict[str, Profile]) -> None:
       bulk_list = {}
       for name, profile in profiles.items():
-            entry = asDict(profile)
+            entry = asdict(profile)
             bulk_list[name] = entry
       with open(PROFILE_FILE, "w") as file:
             json.dump(bulk_list, file, indent = 2)
@@ -91,7 +91,7 @@ def load_calibration() -> Optional[Calibration]:
 
 def save_calibration(cal: Calibration) -> None:
       with open(CALIBRATION_FILE, "w") as file:
-            json.dump(asDict(cal), file, indent=2)
+            json.dump(asdict(cal), file, indent=2)
       print(f"{CALIBRATION_FILE} updated.")
 
 def calibrate(load_cell: HX711) -> bool:
