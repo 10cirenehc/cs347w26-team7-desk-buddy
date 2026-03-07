@@ -1,7 +1,7 @@
 {
-  "raw_zero_value": -0.001,
-  "raw_ref_value": -1071.083,
-  "ref_weight_grams": 132.0,
-  "scale_factor": -8.114257575757577,
-  "last_calibrated": "2026-03-05T18:56:08.450724"
+  "raw_zero_value": -628.59,
+  "raw_ref_value": -715.82,
+  "ref_weight_grams": 400.0,
+  "scale_factor": -0.21807500000000005,
+  "last_calibrated": "2026-03-07T00:16:02.079163"
 }
