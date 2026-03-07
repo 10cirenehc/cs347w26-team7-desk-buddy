@@ -304,7 +304,8 @@ def main():
             if not success:
                   return
             cal = load_calibration()  # reload file
-
+      
+      print("0. Calibration")
       print("1. Profile Mode")
       print("2. Free Mode")
       mode = input("Enter mode number [1/2]: ").strip() # removing whitespace
@@ -312,7 +313,7 @@ def main():
             profile_mode(profiles, cal, my_load)
       elif mode == "2":
             free_mode(cal, my_load)
-      elif mode == "00": # secret code for calibration
+      elif mode == "0": # secret code for calibration
             calibrate(my_load)
       else:
             print("ERROR:\tinvalid mode choice.")
