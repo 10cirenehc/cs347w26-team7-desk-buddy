@@ -4,16 +4,29 @@
     "daily_goal_ml": 2500.0,
     "reminder_frequency": 1800.0,
     "recent_cup": {
-      "name": "Blue Yeti Mug",
-      "cup_weight_grams": 215.0
+      "name": "Owala",
+      "cup_weight_grams": 307.31170468875354
     },
-    "last_sip_time": "2026-03-02T09:45:32.118400"
+    "last_sip_time": "2026-03-07T00:21:05.412211"
   },
   "Bob": {
     "name": "Bob",
     "daily_goal_ml": 2000.0,
     "reminder_frequency": 1800.0,
-    "recent_cup": null,
+    "recent_cup": {
+      "name": "read",
+      "cup_weight_grams": 123.18181818181318
+    },
     "last_sip_time": null
+  },
+  "Katie": {
+    "name": "Katie",
+    "daily_goal_ml": 100.0,
+    "reminder_frequency": 1800,
+    "recent_cup": {
+      "name": "Owala",
+      "cup_weight_grams": 299.17688868508503
+    },
+    "last_sip_time": "2026-03-07T00:25:45.500594"
   }
 }
