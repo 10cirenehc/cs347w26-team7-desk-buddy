@@ -112,6 +112,7 @@ class FocusSessionManager:
         if demo_mode:
             self.EARLY_BREAK_MIN_ELAPSED_MIN = 0.25   # 15 seconds
             self.EARLY_BREAK_CHECK_WINDOW_MIN = 0.25   # 15 seconds
+            self.DEFAULT_FOCUS_DURATION_MIN = 2         # 2 minutes
 
     def _emit(self, event_type_name: str, data: dict = None) -> None:
         """Emit an event on the bus if available."""
@@ -122,16 +123,18 @@ class FocusSessionManager:
         if etype:
             self.event_bus.emit(Event(type=etype, data=data or {}))
 
-    def start_focus(self, duration_min: int = DEFAULT_FOCUS_DURATION_MIN) -> str:
+    def start_focus(self, duration_min: Optional[int] = None) -> str:
         """
         Start a focus session.
 
         Args:
-            duration_min: Focus session duration in minutes
+            duration_min: Focus session duration in minutes (defaults to class/instance setting)
 
         Returns:
             Confirmation message
         """
+        if duration_min is None:
+            duration_min = self.DEFAULT_FOCUS_DURATION_MIN
         self.phase = SessionPhase.FOCUS
         self.start_time = time.time()
         self.target_duration_min = duration_min

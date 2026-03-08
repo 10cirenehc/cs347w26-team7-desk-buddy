@@ -53,6 +53,7 @@ class SmartCoasterTracker:
         coaster_dir: str = "coaster",
         poll_interval: float = DEFAULT_POLL_INTERVAL,
         profile_name: Optional[str] = None,
+        demo_mode: bool = False,
     ):
         self.goal_ml = goal_ml
         self.intake_ml: float = 0.0
@@ -78,7 +79,7 @@ class SmartCoasterTracker:
 
         # Reminder timer
         self._last_reminder_time = time.time()
-        self._reminder_interval = 1800  # 30 min default
+        self._reminder_interval = 60 if demo_mode else 1800  # 1 min demo, 30 min normal
 
     # ------------------------------------------------------------------
     # Setup

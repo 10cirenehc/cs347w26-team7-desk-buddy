@@ -361,6 +361,7 @@ class DeskBuddyApp:
                     coaster_dir=coaster_config.get('coaster_dir', 'coaster'),
                     poll_interval=coaster_config.get('poll_interval', 5.0),
                     profile_name=coaster_config.get('profile_name'),
+                    demo_mode=self.demo_mode,
                 )
                 if coaster.setup():
                     coaster.start()
