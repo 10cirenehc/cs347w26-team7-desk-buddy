@@ -99,8 +99,15 @@ class SmartCoasterTracker:
                 sys.path.insert(0, coaster_path)
             from hx711 import HX711
 
-            GPIO.setmode(GPIO.BOARD)
-            GPIO.setwarnings(False)
+            try:
+                current_mode = GPIO.getmode()
+            except Exception:
+                current_mode = None
+
+            if current_mode is None:
+                GPIO.setmode(GPIO.BOARD)
+            else:
+                logger.info(f"GPIO mode already set to {current_mode}, reusing it")
 
             DT_PIN = 29
             SCK_PIN = 31
