@@ -29,7 +29,7 @@ SIP_THRESHOLD_GRAMS = 10
 EMPTY_CUP_GRAMS = 50
 EMPTY_CUP_TOLERANCE = 10
 NUM_SAMPLES = 1000
-DEFAULT_POLL_INTERVAL = 5.0  # seconds between load cell reads
+DEFAULT_POLL_INTERVAL = 10.0  # seconds between load cell reads
 
 
 class SmartCoasterTracker:
