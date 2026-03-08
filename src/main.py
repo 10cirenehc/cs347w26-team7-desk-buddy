@@ -238,7 +238,7 @@ class DeskBuddyApp:
                 logger.info("Setting up desk control...")
                 await self._setup_desk()
 
-            # ----- LCD -----
+            # ----- LCD (before Hydration so Blinka sets TEGRA_SOC first) -----
             if self.enable_lcd:
                 logger.info("Setting up LCD...")
                 self._setup_lcd()

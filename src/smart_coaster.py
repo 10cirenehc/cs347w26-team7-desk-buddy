@@ -99,11 +99,23 @@ class SmartCoasterTracker:
                 sys.path.insert(0, coaster_path)
             from hx711 import HX711
 
-            GPIO.setmode(GPIO.BOARD)
             GPIO.setwarnings(False)
 
-            DT_PIN = 29
-            SCK_PIN = 31
+            # Blinka (LCD) sets GPIO.TEGRA_SOC at import time via t234/pin.py.
+            # Jetson.GPIO only allows one setmode() per process.
+            # Detect: if a mode is already active, use TEGRA_SOC pin names;
+            # if standalone (no LCD), use BOARD mode like coaster/coaster.py.
+            current_mode = GPIO.getmode()
+            if current_mode is None:
+                GPIO.setmode(GPIO.BOARD)
+                DT_PIN = 29
+                SCK_PIN = 31
+            else:
+                # BOARD 29 → GP18_CAN0_DIN, BOARD 31 → GP17_CAN0_DOUT (AGX Orin)
+                DT_PIN = "GP18_CAN0_DIN"
+                SCK_PIN = "GP17_CAN0_DOUT"
+                logger.info(f"GPIO mode {current_mode} already active, using TEGRA_SOC pins")
+
             self._load_cell = HX711(SCK_PIN, DT_PIN, 128)
             logger.info("HX711 load cell initialized")
 
