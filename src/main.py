@@ -238,16 +238,14 @@ class DeskBuddyApp:
                 logger.info("Setting up desk control...")
                 await self._setup_desk()
 
-            # ----- Hydration Tracker -----
-            # NOTE: Must init before LCD so coaster's GPIO.setmode(BOARD)
-            # doesn't overwrite the mode Blinka sets for the SPI display.
-            logger.info("Setting up hydration tracker...")
-            self._setup_hydration()
-
             # ----- LCD -----
             if self.enable_lcd:
                 logger.info("Setting up LCD...")
                 self._setup_lcd()
+
+            # ----- Hydration Tracker -----
+            logger.info("Setting up hydration tracker...")
+            self._setup_hydration()
 
             # ----- Agent -----
             logger.info("Setting up agent...")

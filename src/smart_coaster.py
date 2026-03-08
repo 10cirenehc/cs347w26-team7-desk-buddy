@@ -99,19 +99,35 @@ class SmartCoasterTracker:
                 sys.path.insert(0, coaster_path)
             from hx711 import HX711
 
-            try:
-                current_mode = GPIO.getmode()
-            except Exception:
-                current_mode = None
+            # Physical BOARD pin numbers for HX711
+            BOARD_DT_PIN = 29
+            BOARD_SCK_PIN = 31
+
+            current_mode = GPIO.getmode()
 
             if current_mode is None:
+                # No mode set yet — safe to use BOARD
                 GPIO.setmode(GPIO.BOARD)
+                dt_pin = BOARD_DT_PIN
+                sck_pin = BOARD_SCK_PIN
+                logger.info("GPIO: set BOARD mode for coaster")
+            elif current_mode == GPIO.BOARD:
+                dt_pin = BOARD_DT_PIN
+                sck_pin = BOARD_SCK_PIN
+                logger.info("GPIO: reusing existing BOARD mode")
             else:
-                logger.info(f"GPIO mode already set to {current_mode}, reusing it")
+                # Another library (Blinka/LCD) set a different mode.
+                # Translate BOARD pin numbers to the active mode.
+                # Jetson.GPIO's internal channel_data maps between modes.
+                dt_pin, sck_pin = self._translate_pins(
+                    GPIO, BOARD_DT_PIN, BOARD_SCK_PIN, current_mode
+                )
+                logger.info(
+                    f"GPIO: mode {current_mode} active, translated pins: "
+                    f"DT {BOARD_DT_PIN}->{dt_pin}, SCK {BOARD_SCK_PIN}->{sck_pin}"
+                )
 
-            DT_PIN = 29
-            SCK_PIN = 31
-            self._load_cell = HX711(SCK_PIN, DT_PIN, 128)
+            self._load_cell = HX711(sck_pin, dt_pin, 128)
             logger.info("HX711 load cell initialized")
 
         except ImportError:
@@ -311,6 +327,60 @@ class SmartCoasterTracker:
     # ------------------------------------------------------------------
     # Hardware helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _translate_pins(GPIO, board_dt: int, board_sck: int, target_mode: int):
+        """
+        Translate BOARD pin numbers to the currently active GPIO mode.
+
+        Uses Jetson.GPIO's internal channel_data to map between numbering
+        schemes (BOARD -> TEGRA_SOC / CVM / BCM).
+        """
+        try:
+            # Jetson.GPIO stores pin mappings in its internal data module
+            from Jetson.GPIO import gpio_pin_data
+            # Get the pin data for this board model
+            # gpio_pin_data has model-specific dictionaries with BOARD -> other mode mappings
+            model = GPIO.model
+            pin_defs = gpio_pin_data.get_data()[model]
+
+            # pin_defs maps BOARD pin -> tuple of (linux_gpio, tegra_soc_name, ...)
+            # The tuple index depends on mode:
+            #   TEGRA_SOC index, CVM index, etc.
+            mode_index = {
+                getattr(GPIO, 'TEGRA_SOC', None): 3,
+                getattr(GPIO, 'CVM', None): 2,
+                GPIO.BCM: 1,
+            }.get(target_mode)
+
+            if mode_index is not None and board_dt in pin_defs:
+                dt_pin = pin_defs[board_dt][mode_index]
+                sck_pin = pin_defs[board_sck][mode_index]
+                return dt_pin, sck_pin
+        except Exception as e:
+            logger.warning(f"Pin translation via gpio_pin_data failed: {e}")
+
+        # Fallback: hardcoded mapping for common Jetson boards
+        # BOARD 29 -> SPI1_SCK / GPIO5_0 / GPIO01  (varies by model)
+        # BOARD 31 -> SPI1_CS1 / GPIO6_0 / GPIO11
+        # These are for Jetson Orin Nano / NX; adjust if using other models
+        BOARD_TO_TEGRA = {
+            29: "GPIO01",
+            31: "GPIO11",
+        }
+        BOARD_TO_BCM = {
+            29: 5,
+            31: 6,
+        }
+
+        if target_mode == getattr(GPIO, 'TEGRA_SOC', -1):
+            return BOARD_TO_TEGRA.get(board_dt, board_dt), BOARD_TO_TEGRA.get(board_sck, board_sck)
+        elif target_mode == GPIO.BCM:
+            return BOARD_TO_BCM.get(board_dt, board_dt), BOARD_TO_BCM.get(board_sck, board_sck)
+        else:
+            # Unknown mode — try BOARD pins and hope for the best
+            logger.warning(f"Unknown GPIO mode {target_mode}, using BOARD pins as-is")
+            return board_dt, board_sck
 
     def _read_grams(self) -> float:
         """Read weight from load cell in grams."""
