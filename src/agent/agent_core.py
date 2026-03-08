@@ -94,6 +94,14 @@ class DeskBuddyAgent:
         (r"(?:water|hydrat).*(?:status|progress)", "check_hydration"),
         (r"(?:i\s+)?(?:drank|had|log).*?(\d+).*(?:m[lL]|water|millil)", "log_water"),
 
+        # Coaster profiles & cups
+        (r"(?:switch|change|load|use).*profile.*(?:to\s+)?(\w+)", "switch_profile"),
+        (r"(?:create|new|add).*profile.*(?:called\s+|named\s+)?(\w+)", "create_profile"),
+        (r"(?:list|show|what).*profile", "list_profiles"),
+        (r"(?:which|what|current).*(?:profile|cup)", "current_profile"),
+        (r"(?:register|set\s*up|tare|weigh|new).*cup.*(?:called\s+|named\s+)?(\w+)", "register_cup"),
+        (r"(?:register|set\s*up|tare|weigh|new).*cup", "register_cup_noname"),
+
         # Desk commands
         (r"(?:stand|standing).*(?:up|desk)", "desk_stand"),
         (r"(?:sit|sitting).*(?:down|desk)", "desk_sit"),
@@ -450,6 +458,67 @@ class DeskBuddyAgent:
         self.hydration.add_intake(float(amount))
         status = self.hydration.get_hydration_status()
         return f"Logged {amount} mL. Total today: {int(status['intake_ml'])} of {int(status['goal_ml'])} mL ({status['percent']:.0f}%)."
+
+    def _intent_switch_profile(self, params: Dict, query: str) -> str:
+        """Switch coaster profile."""
+        if not self.hydration or not hasattr(self.hydration, 'switch_profile'):
+            return "Profile switching requires the smart coaster hardware."
+        name = params.get("param_0", "").strip()
+        if not name:
+            return "Which profile would you like to switch to?"
+        if self.hydration.switch_profile(name):
+            cup = self.hydration.get_current_cup()
+            cup_info = f" using cup '{cup['name']}'" if cup else ""
+            return f"Switched to {name}'s profile{cup_info}."
+        available = ", ".join(self.hydration.list_profiles())
+        return f"Profile '{name}' not found. Available profiles: {available}."
+
+    def _intent_create_profile(self, params: Dict, query: str) -> str:
+        """Create a new coaster profile."""
+        if not self.hydration or not hasattr(self.hydration, 'create_profile'):
+            return "Profile creation requires the smart coaster hardware."
+        name = params.get("param_0", "").strip()
+        if not name:
+            return "What name should I use for the new profile?"
+        self.hydration.create_profile(name)
+        return f"Created profile '{name}'. You can register a cup by saying 'register cup'."
+
+    def _intent_list_profiles(self, params: Dict, query: str) -> str:
+        """List available coaster profiles."""
+        if not self.hydration or not hasattr(self.hydration, 'list_profiles'):
+            return "Profile listing requires the smart coaster hardware."
+        profiles = self.hydration.list_profiles()
+        if not profiles:
+            return "No profiles set up yet. Say 'create profile' followed by a name."
+        active = self.hydration.get_active_profile() if hasattr(self.hydration, 'get_active_profile') else None
+        names = [f"{p} (active)" if p == active else p for p in profiles]
+        return f"Available profiles: {', '.join(names)}."
+
+    def _intent_current_profile(self, params: Dict, query: str) -> str:
+        """Show current profile and cup."""
+        if not self.hydration or not hasattr(self.hydration, 'get_active_profile'):
+            return "Profile info requires the smart coaster hardware."
+        profile = self.hydration.get_active_profile()
+        cup = self.hydration.get_current_cup() if hasattr(self.hydration, 'get_current_cup') else None
+        if not profile:
+            return "No profile is active. Say 'list profiles' to see available profiles."
+        if cup:
+            return f"Using {profile}'s profile with cup '{cup['name']}' (tare: {cup['tare_grams']:.0f}g)."
+        return f"Using {profile}'s profile. No cup registered yet."
+
+    def _intent_register_cup(self, params: Dict, query: str) -> str:
+        """Register a new cup by taring the load cell."""
+        if not self.hydration or not hasattr(self.hydration, 'register_cup'):
+            return "Cup registration requires the smart coaster hardware."
+        name = params.get("param_0", "My Cup").strip()
+        tare = self.hydration.register_cup(name)
+        if tare is not None:
+            return f"Registered cup '{name}' at {tare:.0f} grams. Place your filled cup on the coaster to start tracking."
+        return "Couldn't register the cup. Make sure the empty cup is on the coaster."
+
+    def _intent_register_cup_noname(self, params: Dict, query: str) -> str:
+        """Register a cup without a name."""
+        return self._intent_register_cup({"param_0": "My Cup"}, query)
 
     def get_pending_desk_action(self) -> Optional[str]:
         """Return and clear any pending desk action."""

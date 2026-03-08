@@ -416,6 +416,61 @@ def render_water_goal_edit(current_goal_ml: float) -> Tuple[Image.Image, Dict]:
     return img, hits
 
 
+def render_profile_select(
+    profiles: List[str],
+    active_profile: Optional[str],
+    cup_info: Optional[Dict[str, Any]],
+) -> Tuple[Image.Image, Dict]:
+    """Render coaster profile selection screen."""
+    img, d = blank_canvas()
+    draw_realtime_clock(d)
+
+    centered_text(d, WIDTH // 2, 28, "Coaster Profiles", FONT_LARGE, fill=C_ACCENT)
+
+    hits = {}
+    y = 54
+    btn_h = 32
+    margin = 6
+
+    for i, name in enumerate(profiles[:5]):  # max 5 visible
+        is_active = (name == active_profile)
+        x0, y0 = 10, y
+        x1, y1 = WIDTH - 10, y + btn_h
+        fill = C_ACCENT if is_active else C_PANEL
+        outline = C_OK if is_active else C_SUBTEXT
+        rounded_rect(d, x0, y0, x1, y1, fill=fill, outline=outline)
+        label = f"> {name}" if is_active else name
+        text_col = (0, 0, 0) if is_active else C_TEXT
+        centered_text(d, WIDTH // 2, (y0 + y1) // 2, label, FONT_MED, fill=text_col)
+        hits[f"profile_{i}"] = (x0, y0, x1, y1)
+        y += btn_h + margin
+
+    # Cup info
+    if cup_info:
+        d.text((12, y + 4), f"Cup: {cup_info.get('name', '?')} "
+               f"({cup_info.get('tare_grams', 0):.0f}g)",
+               font=FONT_SMALL, fill=C_SUBTEXT)
+
+    # Bottom buttons
+    bw = (WIDTH - 30) // 2
+
+    # Register cup
+    rx0, ry0 = 10, HEIGHT - 44
+    rx1, ry1 = 10 + bw, HEIGHT - 6
+    rounded_rect(d, rx0, ry0, rx1, ry1, fill=C_BTN, outline=C_WARN)
+    centered_text(d, (rx0 + rx1) // 2, (ry0 + ry1) // 2, "Tare Cup", FONT_SMALL, fill=C_WARN)
+    hits["tare_cup"] = (rx0, ry0, rx1, ry1)
+
+    # Back
+    bx0, by0 = 20 + bw, HEIGHT - 44
+    bx1, by1 = 20 + 2 * bw, HEIGHT - 6
+    rounded_rect(d, bx0, by0, bx1, by1, fill=C_BTN, outline=C_ACCENT)
+    centered_text(d, (bx0 + bx1) // 2, (by0 + by1) // 2, "Back", FONT_SMALL, fill=C_ACCENT)
+    hits["back"] = (bx0, by0, bx1, by1)
+
+    return img, hits
+
+
 def render_hydration_detail(hydration_status: Dict[str, Any]) -> Tuple[Image.Image, Dict]:
     """Render full hydration stats screen."""
     img, d = blank_canvas()
@@ -442,20 +497,29 @@ def render_hydration_detail(hydration_status: Dict[str, Any]) -> Tuple[Image.Ima
     if cup_name:
         d.text((20, 182), f"Cup: {cup_name}", font=FONT_SMALL, fill=C_SUBTEXT)
 
-    # Edit goal button
-    gx0, gy0 = 20, HEIGHT - 44
-    gx1, gy1 = WIDTH // 2 - 10, HEIGHT - 6
-    rounded_rect(d, gx0, gy0, gx1, gy1, fill=C_BTN, outline=C_ACCENT)
-    centered_text(d, (gx0 + gx1) // 2, (gy0 + gy1) // 2, "Set Goal", FONT_SMALL, fill=C_ACCENT)
+    # Bottom buttons: Set Goal | Profile | Back
+    btn_count = 3
+    btn_gap = 8
+    btn_w = (WIDTH - 20 - btn_gap * (btn_count - 1)) // btn_count
 
-    # Back button
-    bx0, by0 = WIDTH // 2 + 10, HEIGHT - 44
-    bx1, by1 = WIDTH - 20, HEIGHT - 6
-    rounded_rect(d, bx0, by0, bx1, by1, fill=C_BTN, outline=C_ACCENT)
-    centered_text(d, (bx0 + bx1) // 2, (by0 + by1) // 2, "Back", FONT_SMALL, fill=C_ACCENT)
+    gx0, gy0 = 10, HEIGHT - 44
+    gx1, gy1 = gx0 + btn_w, HEIGHT - 6
+    rounded_rect(d, gx0, gy0, gx1, gy1, fill=C_BTN, outline=C_ACCENT)
+    centered_text(d, (gx0 + gx1) // 2, (gy0 + gy1) // 2, "Goal", FONT_SMALL, fill=C_ACCENT)
+
+    px0 = gx1 + btn_gap
+    px1 = px0 + btn_w
+    rounded_rect(d, px0, gy0, px1, gy1, fill=C_BTN, outline=C_WARN)
+    centered_text(d, (px0 + px1) // 2, (gy0 + gy1) // 2, "Profile", FONT_SMALL, fill=C_WARN)
+
+    bx0 = px1 + btn_gap
+    bx1 = bx0 + btn_w
+    rounded_rect(d, bx0, gy0, bx1, gy1, fill=C_BTN, outline=C_ACCENT)
+    centered_text(d, (bx0 + bx1) // 2, (gy0 + gy1) // 2, "Back", FONT_SMALL, fill=C_ACCENT)
 
     hits = {
         "set_goal": (gx0, gy0, gx1, gy1),
-        "back": (bx0, by0, bx1, by1),
+        "profile": (px0, gy0, px1, gy1),
+        "back": (bx0, gy0, bx1, gy1),
     }
     return img, hits

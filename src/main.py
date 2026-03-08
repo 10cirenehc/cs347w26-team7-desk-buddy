@@ -347,12 +347,35 @@ class DeskBuddyApp:
             self.enable_lcd = False
 
     def _setup_hydration(self) -> None:
-        """Setup hydration tracker."""
-        from .hydration import HydrationTracker
-
+        """Setup hydration tracker. Uses SmartCoaster hardware if available."""
         hydration_config = self.config.get('hydration', {})
+        coaster_config = self.config.get('coaster', {})
+        goal_ml = hydration_config.get('daily_goal_ml', 2000)
+
+        if coaster_config.get('enabled', True):
+            try:
+                from .smart_coaster import SmartCoasterTracker
+                coaster = SmartCoasterTracker(
+                    goal_ml=goal_ml,
+                    event_bus=self.event_bus,
+                    coaster_dir=coaster_config.get('coaster_dir', 'coaster'),
+                    poll_interval=coaster_config.get('poll_interval', 5.0),
+                    profile_name=coaster_config.get('profile_name'),
+                )
+                if coaster.setup():
+                    coaster.start()
+                    self.hydration = coaster
+                    logger.info("Smart Coaster hardware active")
+                    return
+                else:
+                    logger.info("Smart Coaster setup failed, falling back to simulated tracker")
+            except Exception as e:
+                logger.info(f"Smart Coaster unavailable ({e}), using simulated tracker")
+
+        # Fallback: simulated hydration tracker
+        from .hydration import HydrationTracker
         self.hydration = HydrationTracker(
-            goal_ml=hydration_config.get('daily_goal_ml', 2000),
+            goal_ml=goal_ml,
             event_bus=self.event_bus,
         )
 
@@ -797,6 +820,34 @@ class DeskBuddyApp:
             if self.hydration:
                 self.hydration.set_goal(float(goal))
 
+        elif action_type == "refresh_profiles":
+            self._push_profile_data_to_lcd()
+
+        elif action_type == "switch_profile":
+            name = action.get("profile_name")
+            if name and self.hydration and hasattr(self.hydration, 'switch_profile'):
+                if self.hydration.switch_profile(name):
+                    self._push_profile_data_to_lcd()
+                    if self.tts:
+                        self.tts.speak(f"Switched to {name}'s profile.")
+
+        elif action_type == "tare_cup":
+            if self.hydration and hasattr(self.hydration, 'register_cup'):
+                tare = self.hydration.register_cup("My Cup")
+                self._push_profile_data_to_lcd()
+                if tare is not None and self.tts:
+                    self.tts.speak(f"Cup registered at {tare:.0f} grams.")
+
+    def _push_profile_data_to_lcd(self) -> None:
+        """Send current profile list to LCD."""
+        if not self.lcd or not self.hydration:
+            return
+        if hasattr(self.hydration, 'list_profiles'):
+            profiles = self.hydration.list_profiles()
+            active = self.hydration.get_active_profile() if hasattr(self.hydration, 'get_active_profile') else None
+            cup = self.hydration.get_current_cup() if hasattr(self.hydration, 'get_current_cup') else None
+            self.lcd.update_profiles(profiles, active, cup)
+
     def _draw_overlay(self, frame, posture, focus, presence,
                        phone_detected=False, features=None):
         """Draw status overlay on frame."""
@@ -939,6 +990,10 @@ class DeskBuddyApp:
             self.wake_word.stop()
         if self.audio_manager:
             self.audio_manager.close()
+
+        # Stop coaster polling
+        if self.hydration and hasattr(self.hydration, 'stop'):
+            self.hydration.stop()
 
         # Shutdown LCD
         if self.lcd:

@@ -92,6 +92,13 @@ hydration:
   daily_goal_ml: 2000
   reminder_frequency_seconds: 1800
 
+# Smart Coaster (HX711 load cell) configuration
+coaster:
+  enabled: true                  # Try hardware coaster; falls back to simulated if unavailable
+  coaster_dir: "coaster"         # Directory containing calibration.json & coaster_profiles.json
+  poll_interval: 5.0             # Seconds between load cell reads
+  profile_name: null             # Profile from coaster_profiles.json (null = first available)
+
 # Desk control configuration
 desk:
   enabled: true

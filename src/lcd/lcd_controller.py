@@ -35,6 +35,7 @@ class LCDState(Enum):
     WALLPAPER = "wallpaper"
     WATER_GOAL_EDIT = "water_goal_edit"
     HYDRATION_DETAIL = "hydration_detail"
+    PROFILE_SELECT = "profile_select"
 
 
 class LCDController:
@@ -95,6 +96,11 @@ class LCDController:
 
         # Water goal edit state
         self._edit_goal_ml = 2000.0
+
+        # Profile selection state
+        self._profile_names: List[str] = []
+        self._active_profile: Optional[str] = None
+        self._cup_info: Optional[Dict[str, Any]] = None
 
         # Mute state
         self._muted = False
@@ -212,6 +218,14 @@ class LCDController:
 
     # ── Main-thread API ──
 
+    def update_profiles(self, profiles: List[str], active: Optional[str],
+                        cup_info: Optional[Dict] = None) -> None:
+        """Push profile data for the profile selection screen (thread-safe)."""
+        with self._lock:
+            self._profile_names = profiles
+            self._active_profile = active
+            self._cup_info = cup_info
+
     def update(self, posture, focus, hydration_status: Dict, timer_status: Optional[Dict],
                muted: bool = False) -> None:
         """
@@ -303,6 +317,8 @@ class LCDController:
             return self._touch_water_goal(tx, ty)
         elif self._state == LCDState.HYDRATION_DETAIL:
             return self._touch_hydration_detail(tx, ty)
+        elif self._state == LCDState.PROFILE_SELECT:
+            return self._touch_profile_select(tx, ty)
         return None
 
     def _touch_home(self, tx, ty) -> Optional[Dict]:
@@ -392,8 +408,25 @@ class LCDController:
         if self._hits.get("set_goal") and touch_in(tx, ty, *self._hits["set_goal"]):
             self._edit_goal_ml = self._hydration_status.get("goal_ml", 2000)
             self._state = LCDState.WATER_GOAL_EDIT
+        elif self._hits.get("profile") and touch_in(tx, ty, *self._hits["profile"]):
+            self._state = LCDState.PROFILE_SELECT
+            return {"action": "refresh_profiles"}
         elif self._hits.get("back") and touch_in(tx, ty, *self._hits["back"]):
             self._state = LCDState.HOME
+        return None
+
+    def _touch_profile_select(self, tx, ty) -> Optional[Dict]:
+        # Profile buttons
+        for i, name in enumerate(self._profile_names):
+            key = f"profile_{i}"
+            if self._hits.get(key) and touch_in(tx, ty, *self._hits[key]):
+                return {"action": "switch_profile", "profile_name": name}
+        # Tare cup
+        if self._hits.get("tare_cup") and touch_in(tx, ty, *self._hits["tare_cup"]):
+            return {"action": "tare_cup"}
+        # Back
+        if self._hits.get("back") and touch_in(tx, ty, *self._hits["back"]):
+            self._state = LCDState.HYDRATION_DETAIL
         return None
 
     # ── Rendering ──
@@ -463,6 +496,11 @@ class LCDController:
 
         elif self._state == LCDState.HYDRATION_DETAIL:
             return screens.render_hydration_detail(self._hydration_status)
+
+        elif self._state == LCDState.PROFILE_SELECT:
+            return screens.render_profile_select(
+                self._profile_names, self._active_profile, self._cup_info,
+            )
 
         # Fallback
         return screens.render_home(
