@@ -106,6 +106,7 @@ class FocusSessionManager:
         self._last_suggestion_time: float = 0.0
         self._suggestion_cooldown: float = 5.0 if demo_mode else 60.0
         self._posture_warned: bool = False
+        self._halfway_announced: bool = False
         self._distraction_events: List[float] = []
 
         # Override thresholds in demo mode
@@ -140,6 +141,8 @@ class FocusSessionManager:
         self.target_duration_min = duration_min
         self.stats = SessionStats(target_duration_min=duration_min)
         self._posture_warned = False
+        self._halfway_announced = False
+        self._last_suggestion_time = 0.0
         self._distraction_events = []
 
         msg = f"Starting {duration_min}-minute focus session. I'll track your focus and posture."
@@ -274,7 +277,8 @@ class FocusSessionManager:
                 )
 
         # Periodic encouragement at halfway point
-        if abs(elapsed_min - self.target_duration_min / 2) < 0.5:
+        if not self._halfway_announced and abs(elapsed_min - self.target_duration_min / 2) < 0.5:
+            self._halfway_announced = True
             self._last_suggestion_time = now
             remaining = self.target_duration_min - elapsed_min
             return SessionSuggestion(

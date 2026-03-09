@@ -19,6 +19,8 @@ from .lcd_driver import LCDDriver, WIDTH, HEIGHT
 from .lcd_drawing import touch_in, find_wallpapers, load_wallpaper
 from . import lcd_screens as screens
 
+NOTIF_AUTO_DISMISS_SEC = 5.0
+
 if TYPE_CHECKING:
     from ..events import EventBus, Event
 
@@ -82,6 +84,7 @@ class LCDController:
         # Notification queue
         self._notif_queue: List[Dict[str, str]] = []
         self._current_notif: Optional[Dict[str, str]] = None
+        self._notif_show_time: float = 0.0
 
         # Timer setup state
         self._timer_h = 0
@@ -278,9 +281,17 @@ class LCDController:
 
                 # Check for pending notifications
                 with self._lock:
+                    # Auto-dismiss stale notifications
+                    if (self._state == LCDState.NOTIFICATION
+                            and self._current_notif is not None
+                            and now - self._notif_show_time > NOTIF_AUTO_DISMISS_SEC):
+                        self._current_notif = None
+                        self._state = LCDState.HOME
+                    # Pop next notification
                     if (self._state == LCDState.HOME and self._notif_queue
                             and self._current_notif is None):
                         self._current_notif = self._notif_queue.pop(0)
+                        self._notif_show_time = now
                         self._state = LCDState.NOTIFICATION
 
                 # Periodic redraw

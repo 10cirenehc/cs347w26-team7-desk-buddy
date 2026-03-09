@@ -137,8 +137,8 @@ class AlertEngine:
         self._rules.append(AlertRule(
             name="focus_severe_slouch",
             condition=lambda h: h.state_ratio("posture", "bad", 60 if demo else 900) > 0.75,
-            action=AlertAction.VOICE_AND_DESK,
-            message_template="Your posture needs attention. Standing for a moment.",
+            action=AlertAction.DESK_STAND,
+            message_template="",
             cooldown_seconds=30 if demo else 1800,
             priority=AlertPriority.HIGH,
             requires_focus_session=True,
@@ -150,8 +150,8 @@ class AlertEngine:
         self._rules.append(AlertRule(
             name="idle_bad_posture",
             condition=lambda h: h.state_ratio("posture", "bad", 40 if demo else 600) > 0.7,
-            action=AlertAction.VOICE_AND_DESK,
-            message_template="Time to stand! You've been slouching for a while.",
+            action=AlertAction.DESK_STAND,
+            message_template="",
             cooldown_seconds=30 if demo else 1800,
             priority=AlertPriority.MEDIUM,
             requires_focus_session=False,
