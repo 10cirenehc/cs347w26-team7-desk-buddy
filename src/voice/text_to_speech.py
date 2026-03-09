@@ -219,8 +219,10 @@ class TextToSpeech:
                         if name != self._backend:
                             logger.info(f"TTS fell back to '{name}' backend")
                         return True
+                    else:
+                        logger.warning(f"TTS backend '{name}' returned failure")
                 except Exception as e:
-                    logger.debug(f"TTS backend '{name}' failed: {e}")
+                    logger.warning(f"TTS backend '{name}' failed: {e}")
 
             logger.error("All TTS backends failed")
             return False
@@ -299,14 +301,34 @@ class TextToSpeech:
                 stdin=espeak.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             )
             espeak.stdout.close()
-            aplay.communicate()
-            return aplay.returncode == 0
+            aplay_out, aplay_err = aplay.communicate()
+            espeak.wait()
+            if espeak.returncode != 0:
+                logger.warning(f"espeak-ng failed (rc={espeak.returncode})")
+            if aplay.returncode != 0:
+                stderr_msg = aplay_err.decode(errors='replace').strip() if aplay_err else ''
+                logger.warning(f"aplay failed (rc={aplay.returncode}): {stderr_msg}")
+                # Fallback: try espeak-ng direct output (no aplay pipe)
+                result = subprocess.run(
+                    ["espeak-ng", "-s", str(rate), text],
+                    capture_output=True,
+                )
+                if result.returncode != 0:
+                    err = result.stderr.decode(errors='replace').strip()
+                    logger.warning(f"espeak-ng direct also failed: {err}")
+                    return False
+                return True
+            return True
         else:
             result = subprocess.run(
                 ["espeak-ng", "-s", str(rate), text],
                 capture_output=True,
             )
-            return result.returncode == 0
+            if result.returncode != 0:
+                err = result.stderr.decode(errors='replace').strip()
+                logger.warning(f"espeak-ng failed: {err}")
+                return False
+            return True
 
     def speak_async(self, text: str) -> None:
         """Speak text without blocking."""
