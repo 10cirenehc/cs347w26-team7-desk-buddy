@@ -64,6 +64,7 @@ class DeskBuddyApp:
         enable_display: bool = True,
         enable_lcd: bool = True,
         demo_mode: bool = False,
+        demo_desk: bool = False,
     ):
         """
         Initialize Desk Buddy application.
@@ -75,6 +76,7 @@ class DeskBuddyApp:
             enable_display: Show video display
             enable_lcd: Enable LCD touchscreen
             demo_mode: Use shortened alert thresholds for demo/presentation
+            demo_desk: Aggressive desk demo (1 min sit + 60% bad posture → stand)
         """
         self.config_path = config_path
         self.enable_voice = enable_voice
@@ -82,6 +84,7 @@ class DeskBuddyApp:
         self.enable_display = enable_display
         self.enable_lcd = enable_lcd
         self.demo_mode = demo_mode
+        self.demo_desk = demo_desk
 
         self.config = load_config(config_path)
         self._running = False
@@ -418,6 +421,7 @@ class DeskBuddyApp:
             tts=self.tts,
             enabled=alerts_config.get('enabled', True),
             demo_mode=self.demo_mode,
+            demo_desk=self.demo_desk,
             event_bus=self.event_bus,
         )
 
@@ -1024,6 +1028,7 @@ async def main():
     parser.add_argument("--no-lcd", action="store_true", help="Disable LCD touchscreen")
     parser.add_argument("--skip-calibration", action="store_true", help="Skip calibration (use saved)")
     parser.add_argument("--demo", action="store_true", help="Demo mode with shortened alert thresholds")
+    parser.add_argument("--demo-desk", action="store_true", help="Aggressive desk demo (1 min sit + bad posture → stand)")
     args = parser.parse_args()
 
     # Create app
@@ -1034,6 +1039,7 @@ async def main():
         enable_display=not args.no_display,
         enable_lcd=not args.no_lcd,
         demo_mode=args.demo,
+        demo_desk=args.demo_desk,
     )
 
     # Setup

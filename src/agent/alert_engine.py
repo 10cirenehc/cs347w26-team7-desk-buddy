@@ -88,6 +88,7 @@ class AlertEngine:
         tts: Optional['TextToSpeech'] = None,
         enabled: bool = True,
         demo_mode: bool = False,
+        demo_desk: bool = False,
         event_bus: Optional['EventBus'] = None,
     ):
         """
@@ -98,12 +99,14 @@ class AlertEngine:
             tts: TextToSpeech for voice alerts
             enabled: Whether alerts are enabled
             demo_mode: Use shortened thresholds for demo/presentation
+            demo_desk: Aggressive desk demo (1 min sit + 60% bad → stand)
             event_bus: EventBus for emitting alert events
         """
         self.desk = desk_client
         self.tts = tts
         self.enabled = enabled
         self.demo_mode = demo_mode
+        self.demo_desk = demo_desk
         self.event_bus = event_bus
 
         self._rules: List[AlertRule] = []
@@ -181,16 +184,16 @@ class AlertEngine:
             requires_focus_session=None,  # Always active
         ))
 
-        # Good posture streak - positive reinforcement
-        self._rules.append(AlertRule(
-            name="good_posture_streak",
-            condition=lambda h: h.state_ratio("posture", "good", 40 if demo else 1800) > 0.9,
-            action=AlertAction.VOICE,
-            message_template="Great job! 30 minutes of excellent posture.",
-            cooldown_seconds=30 if demo else 3600,
-            priority=AlertPriority.LOW,
-            requires_focus_session=None,
-        ))
+        # Good posture streak - disabled (was TTS, removed to reduce noise)
+        # self._rules.append(AlertRule(
+        #     name="good_posture_streak",
+        #     condition=lambda h: h.state_ratio("posture", "good", 40 if demo else 1800) > 0.9,
+        #     action=AlertAction.VOICE,
+        #     message_template="Great job! 30 minutes of excellent posture.",
+        #     cooldown_seconds=30 if demo else 3600,
+        #     priority=AlertPriority.LOW,
+        #     requires_focus_session=None,
+        # ))
 
         # Phone distraction warning
         self._rules.append(AlertRule(
@@ -206,6 +209,21 @@ class AlertEngine:
             priority=AlertPriority.MEDIUM,
             requires_focus_session=True,  # Only during focus sessions
         ))
+
+        # ----- Demo desk rule: aggressive stand after 1 min sit + bad posture -----
+        if self.demo_desk:
+            self._rules.append(AlertRule(
+                name="demo_desk_stand",
+                condition=lambda h: (
+                    h.duration_in_state("presence", "seated") > 60
+                    and h.state_ratio("posture", "bad", 60) > 0.6
+                ),
+                action=AlertAction.VOICE_AND_DESK,
+                message_template="You've been slouching for a while. Let's stand up and reset your posture.",
+                cooldown_seconds=30,
+                priority=AlertPriority.URGENT,
+                requires_focus_session=None,  # Always active
+            ))
 
     def set_muted(self, muted: bool) -> None:
         """Mute or unmute TTS alerts. Desk actions and events still fire."""
