@@ -60,6 +60,7 @@ class SmartCoasterTracker:
         self.last_sip_time: Optional[float] = None
         self.event_bus = event_bus
         self._goal_reached_notified = False
+        self._demo_mode = demo_mode
 
         self._coaster_dir = Path(coaster_dir)
         self._poll_interval = poll_interval
@@ -79,7 +80,7 @@ class SmartCoasterTracker:
 
         # Reminder timer
         self._last_reminder_time = time.time()
-        self._reminder_interval = 60 if demo_mode else 1800  # 1 min demo, 30 min normal
+        self._reminder_interval = 120 if demo_mode else 1800  # 2 min demo, 30 min normal
 
     # ------------------------------------------------------------------
     # Setup
@@ -238,7 +239,8 @@ class SmartCoasterTracker:
         self._last_weight = weight
 
         if sip_amount >= SIP_THRESHOLD_GRAMS:
-            self._last_reminder_time = time.time()
+            if not self._demo_mode:
+                self._last_reminder_time = time.time()
             return sip_amount
         return None
 

@@ -74,7 +74,7 @@ class DeskClient:
     # Sitting height threshold in cm (below this = sitting)
     SIT_THRESHOLD_CM = 75.0
     # Standing height threshold in cm (above this = standing)
-    STAND_THRESHOLD_CM = 100.0
+    STAND_THRESHOLD_CM = 105.0
 
     # BLE height parsing constants (from sitstand/desk_server.py)
     HEIGHT_SCALE_FACTOR = 100.7874

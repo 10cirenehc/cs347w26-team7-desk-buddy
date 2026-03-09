@@ -150,7 +150,7 @@ class AlertEngine:
         self._rules.append(AlertRule(
             name="idle_bad_posture",
             condition=lambda h: h.state_ratio("posture", "bad", 40 if demo else 600) > 0.7,
-            action=AlertAction.DESK_STAND,
+            action=AlertAction.DESK_NUDGE,
             message_template="",
             cooldown_seconds=30 if demo else 1800,
             priority=AlertPriority.MEDIUM,
@@ -161,7 +161,7 @@ class AlertEngine:
         self._rules.append(AlertRule(
             name="sitting_too_long",
             condition=lambda h: h.duration_in_state("presence", "seated") > (60 if demo else 3600),
-            action=AlertAction.VOICE,
+            action=AlertAction.VOICE_AND_DESK,
             message_template="You've been sitting for an hour. Consider standing for a few minutes.",
             cooldown_seconds=30 if demo else 3600,
             priority=AlertPriority.LOW,
